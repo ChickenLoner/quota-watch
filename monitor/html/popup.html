@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+
+<div class="hexbg"></div>
+
+<header>
+  <div class="header-left">
+    <span class="live-dot"></span>
+    <span id="title"></span>
+  </div>
+  <div class="header-right">
+    <button type="button" id="refreshBtn" aria-label="Refresh">&#x21BB;</button>
+    <button type="button" id="closeBtn" aria-label="Close">&times;</button>
+  </div>
+</header>
+
+<section id="accountSection">
+  <h2 class="section-head"><i></i><span id="headingAccount"></span></h2>
+  <dl>
+    <div id="emailRow">
+      <dt id="labelEmail"></dt>
+      <dd id="emailValue"></dd>
+    </div>
+    <div id="planRow">
+      <dt id="labelPlan"></dt>
+      <dd id="planValue" class="plan-badge"></dd>
+    </div>
+  </dl>
+</section>
+
+<section id="usageSection">
+  <h2 class="section-head"><i></i><span id="headingUsage"></span></h2>
+  <div id="usageBars"></div>
+</section>
+
+<section id="extraSection">
+  <h2 class="section-head"><i></i><span id="headingExtraUsage"></span></h2>
+  <div class="bar-header">
+    <span id="extraSpent"></span>
+    <span id="extraPct" class="bar-pct"></span>
+  </div>
+  <div class="bar-container">
+    <div class="bar-fill ok" id="extraFill" style="width:0%"></div>
+  </div>
+</section>
+
+<section id="installSection">
+  <div class="heading-row">
+    <h2 class="section-head"><i></i><span id="headingClaudeCode"></span></h2>
+    <span id="changelogLink" class="link"></span>
+  </div>
+  <dl id="installRows"></dl>
+</section>
+
+<footer id="statusSection">
+  <span id="statusText"></span>
+  <span id="appVersion" class="mono-dim"></span>
+</footer>
+
+<script src="popup.js"></script>
+</body>
+</html>

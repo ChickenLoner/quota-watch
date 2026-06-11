@@ -1,0 +1,19 @@
+[project]
+name = "soc-claude-monitor"
+version = "0.1.0"
+description = "SOC-themed Claude API usage monitor"
+requires-python = ">=3.11"
+dependencies = [
+    "pystray>=0.19",
+    "pillow>=10.0",
+    "pywebview>=4.0",
+    "requests>=2.31",
+]
+
+[project.scripts]
+soc-monitor = "monitor.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.20.0",
+]
