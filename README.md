@@ -106,7 +106,7 @@ Download `SocClaudeMonitor.exe` from [Releases](../../releases) and run it. No i
 ### From source
 
 ```powershell
-git clone https://github.com/ChickenLoner/soc-claude-monitor
+git clone https://github.com/ChickenLoner/claude-monitor
 cd soc-claude-monitor
 uv sync
 uv run -m monitor
