@@ -43,8 +43,6 @@ Built as a personal replacement for [usage-monitor-for-claude](https://github.co
 │  ██░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   │
 │  RESETS IN 6D 22H 39M (WED 01:59)      │
 │                                         │
-│  DESIGN [beta] - 7D     0%  [NOMINAL]   │
-│  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   │
 ├─────────────────────────────────────────┤
 │ ║ CLAUDE CODE                CHANGELOG  │
 │   CLI        1.x.x                      │
@@ -58,7 +56,7 @@ Built as a personal replacement for [usage-monitor-for-claude](https://github.co
 
 ## Features
 
-- **Live tray icon** — dual progress bars (session 5h + weekly 7d) color-coded green/amber/red by threshold
+- **Live tray icon** — dual progress bars (session 5h + weekly 7d) color-coded green/amber/red by threshold (Design tokens now merged into session 5h)
 - **Session countdown on icon** — reset timer (e.g. `4h22`) drawn directly on the tray icon in cyan
 - **On-demand refresh** — `↻` button in popup header fetches fresh data instantly without waiting for the next poll
 - **Detail popup** — SOC-themed overlay with all active quota channels, severity badges (NOMINAL / WARNING / CRITICAL / BREACH), account info, and Claude Code versions
@@ -75,13 +73,13 @@ Built as a personal replacement for [usage-monitor-for-claude](https://github.co
 
 ---
 
-## Quota channels (as of 2026-05)
+## Quota channels (as of 2026-06)
 
 | API field | Display label | Your plan |
 |---|---|---|
 | `five_hour` | SESSION - 5H | ✓ active |
 | `seven_day` | WEEKLY - 7D | ✓ active |
-| `seven_day_omelette` | DESIGN [beta] - 7D | ✓ active (Claude Design beta) |
+| `seven_day_omelette` | DESIGN [beta] - 7D | merged into SESSION - 5H (no longer separate) |
 | `seven_day_opus` | OPUS - 7D | Claude Max only |
 | `seven_day_sonnet` | SONNET - 7D | Claude Max only |
 | `seven_day_cowork` | COWORK - 7D | — |
@@ -108,7 +106,7 @@ Download `SocClaudeMonitor.exe` from [Releases](../../releases) and run it. No i
 ### From source
 
 ```powershell
-git clone https://github.com/YOUR_USERNAME/soc-claude-monitor
+git clone https://github.com/ChickenLoner/soc-claude-monitor
 cd soc-claude-monitor
 uv sync
 uv run -m monitor
