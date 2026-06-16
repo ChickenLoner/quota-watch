@@ -89,11 +89,27 @@ New fields from the API appear automatically — no code changes needed.
 
 ---
 
+## Platform coverage
+
+| Platform | Implementation | Status |
+|---|---|---|
+| Windows 10+ | System tray app (Python + WebView2) | ✓ [`monitor/`](monitor/) |
+| Linux / Kali | Claude Code statusline + TUI dashboard (Python + rich) | ✓ [`linux/`](linux/) |
+
+---
+
 ## Requirements
 
+### Windows
 - Windows 10 or later
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated (`claude auth login`)
 - [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) — pre-installed on Windows 11; download separately for Windows 10
+
+### Linux
+- Python 3.10+, `pip install requests rich`
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated (`claude login`)
+
+See [`linux/README.md`](linux/README.md) for full details.
 
 ---
 

@@ -1,0 +1,390 @@
+#!/usr/bin/env python3
+"""
+claude-usage — Terminal dashboard for Claude API usage.
+
+Usage:
+  claude-usage           Show current usage and exit
+  claude-usage -w        Watch mode, refresh every 60s
+  claude-usage -w 30     Watch mode, refresh every 30s
+  claude-usage -r        Force refresh (bypass cache)
+"""
+import argparse
+import json
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+from rich.console import Console
+from rich.live import Live
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+
+CREDS = Path.home() / ".claude" / ".credentials.json"
+CACHE = Path.home() / ".cache" / "claude-usage.json"
+TTL   = 300
+
+console = Console()
+
+# ---------------------------------------------------------------------------
+# Auth & API
+# ---------------------------------------------------------------------------
+
+def read_token() -> str | None:
+    try:
+        with open(CREDS) as f:
+            return json.load(f)["claudeAiOauth"]["accessToken"]
+    except Exception:
+        return None
+
+
+def fetch_usage(token: str) -> dict:
+    """GET /api/oauth/usage — returns JSON directly, zero token cost."""
+    import requests
+
+    r = requests.get(
+        "https://api.anthropic.com/api/oauth/usage",
+        headers={
+            "Authorization":     f"Bearer {token}",
+            "anthropic-version": "2023-06-01",
+        },
+        timeout=15,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+def parse_response(data: dict) -> dict:
+    fh = data.get("five_hour") or {}
+    sd = data.get("seven_day") or {}
+
+    limits   = data.get("limits") or []
+    active   = next((l for l in limits if l.get("is_active")), None)
+    severity = active.get("severity") if active else (
+               limits[0].get("severity") if limits else None)
+
+    # Collect any active non-standard channels (opus, sonnet, etc.)
+    extra_channels = {
+        k: v for k, v in data.items()
+        if k not in ("five_hour", "seven_day", "extra_usage", "limits", "spend")
+        and v is not None
+        and isinstance(v, dict)
+        and v.get("utilization") is not None
+    }
+
+    return {
+        "s_pct":          fh.get("utilization"),
+        "w_pct":          sd.get("utilization"),
+        "s_reset":        fh.get("resets_at"),
+        "w_reset":        sd.get("resets_at"),
+        "severity":       severity,
+        "limits":         limits,
+        "extra_channels": extra_channels,
+        "extra_usage":    data.get("extra_usage") or {},
+        "spend":          data.get("spend") or {},
+    }
+
+# ---------------------------------------------------------------------------
+# Cache
+# ---------------------------------------------------------------------------
+
+def load_cache(require_full: bool = True) -> dict | None:
+    try:
+        with open(CACHE) as f:
+            c = json.load(f)
+        age = time.time() - c.get("ts", 0)
+        if age < TTL:
+            if require_full and "s_reset" not in c:
+                return None
+            return c
+    except Exception:
+        pass
+    return None
+
+
+def save_cache(data: dict):
+    CACHE.parent.mkdir(parents=True, exist_ok=True)
+    data["ts"] = time.time()
+    with open(CACHE, "w") as f:
+        json.dump(data, f)
+
+# ---------------------------------------------------------------------------
+# Data fetch
+# ---------------------------------------------------------------------------
+
+def get_data(force_refresh: bool = False) -> dict:
+    if not force_refresh:
+        cached = load_cache(require_full=True)
+        if cached:
+            return cached
+
+    token = read_token()
+    if not token:
+        console.print("[bold red]Error:[/bold red] Cannot read "
+                      "[cyan]~/.claude/.credentials.json[/cyan]")
+        sys.exit(1)
+
+    with console.status("[dim]Fetching usage data…[/dim]", spinner="dots"):
+        try:
+            raw = fetch_usage(token)
+        except Exception as e:
+            console.print(f"[bold red]API error:[/bold red] {e}")
+            sys.exit(1)
+
+    data = parse_response(raw)
+
+    # Rebuild statusline `out` field so the shared cache stays coherent
+    s_pct = data.get("s_pct")
+    w_pct = data.get("w_pct")
+    s_iso = data.get("s_reset")
+    mins  = _mins_until(s_iso) if s_iso else None
+    parts = []
+    if s_pct is not None:
+        parts.append(f"⬆{int(s_pct)}%")
+    if w_pct is not None:
+        parts.append(f"7d:{int(w_pct)}%")
+    if mins is not None:
+        h, m = divmod(int(mins), 60)
+        parts.append(f"↺{h}h{m:02d}m" if h else f"↺{m}m")
+    data["out"] = " ".join(parts)
+
+    save_cache(data)
+    return data
+
+# ---------------------------------------------------------------------------
+# Rendering helpers
+# ---------------------------------------------------------------------------
+
+BAR_WIDTH = 22
+
+SEVERITY_STYLE = {
+    "normal":   "green",
+    "warning":  "yellow",
+    "critical": "red",
+    "breach":   "magenta",
+}
+
+SEVERITY_LABEL = {
+    "normal":   "NOMINAL",
+    "warning":  "WARNING",
+    "critical": "CRITICAL",
+    "breach":   "BREACH",
+}
+
+
+def pace_style(pct: float | None) -> str:
+    if pct is None:  return "white"
+    if pct < 50:     return "green"
+    if pct < 75:     return "yellow"
+    if pct < 90:     return "orange1"
+    return "red"
+
+
+def pct_bar(pct: float | None) -> Text:
+    p      = max(0.0, min(100.0, float(pct or 0)))
+    filled = int(p * BAR_WIDTH / 100)
+    empty  = BAR_WIDTH - filled
+    t      = Text()
+    t.append("█" * filled, style=pace_style(pct))
+    t.append("░" * empty,  style="bright_black")
+    return t
+
+
+def _mins_until(iso_str: str) -> int | None:
+    try:
+        dt = datetime.fromisoformat(iso_str)
+        return max(0, int((dt - datetime.now(timezone.utc)).total_seconds() / 60))
+    except Exception:
+        return None
+
+
+def fmt_countdown(iso_str: str | None) -> str:
+    if not iso_str:
+        return "unknown"
+    mins = _mins_until(iso_str)
+    if mins is None:
+        return "unknown"
+    if mins == 0:
+        return "now"
+    d = mins // (60 * 24)
+    h = (mins % (60 * 24)) // 60
+    m = mins % 60
+    if d:   return f"{d}d {h:02d}h"
+    if h:   return f"{h}h {m:02d}m"
+    return  f"{m}m"
+
+
+def severity_badge(sev: str | None) -> Text:
+    s = (sev or "normal").lower()
+    style = SEVERITY_STYLE.get(s, "white")
+    label = SEVERITY_LABEL.get(s, s.upper())
+    return Text(f"[{label}]", style=f"bold {style}")
+
+
+def status_text(status: str | None) -> Text:
+    if not status:
+        return Text("—", style="dim")
+    s = status.lower()
+    if s in ("allowed", "normal"):
+        return Text("✓ " + status, style="bold green")
+    if s in ("denied", "critical", "breach"):
+        return Text("✗ " + status, style="bold red")
+    return Text(status, style="yellow")
+
+# ---------------------------------------------------------------------------
+# Dashboard
+# ---------------------------------------------------------------------------
+
+def build_dashboard(data: dict) -> Panel:
+    now_str   = datetime.now().strftime("%Y-%m-%d  %H:%M:%S")
+    cache_age = int(time.time() - data.get("ts", time.time()))
+    age_label = (Text("live", style="green dim")
+                 if cache_age < 5
+                 else Text(f"cached {cache_age}s ago", style="dim"))
+
+    # ── title ──────────────────────────────────────────────────────────────
+    title = Text()
+    title.append(" Claude Usage ", style="bold cyan")
+    title.append(f"  {now_str}  ", style="dim")
+    title.append(" · ", style="bright_black")
+    title.append_text(age_label)
+    title.append(" ", style="")
+
+    s_pct  = data.get("s_pct")
+    w_pct  = data.get("w_pct")
+    s_iso  = data.get("s_reset")
+    w_iso  = data.get("w_reset")
+
+    # ── usage rows ─────────────────────────────────────────────────────────
+    usage_tbl = Table(box=None, show_header=False, padding=(0, 1), expand=False)
+    usage_tbl.add_column("label",     style="bold",    width=16)
+    usage_tbl.add_column("bar",       width=BAR_WIDTH)
+    usage_tbl.add_column("pct",       justify="right", width=4)
+    usage_tbl.add_column("sev",       width=10)
+    usage_tbl.add_column("countdown", style="dim",     width=12)
+
+    def usage_row(label, pct, iso, sev=None):
+        style = pace_style(pct)
+        return (
+            Text(label, style="bold"),
+            pct_bar(pct),
+            Text(f"{int(pct or 0)}%", style=f"bold {style}"),
+            severity_badge(sev),
+            Text(f"↺ {fmt_countdown(iso)}", style="dim"),
+        )
+
+    # Pull per-window severity from limits
+    limits   = data.get("limits") or []
+    sev_map  = {l.get("group"): l.get("severity") for l in limits}
+    s_sev    = sev_map.get("session")
+    w_sev    = sev_map.get("weekly")
+
+    usage_tbl.add_row(*usage_row("5-Hour Session", s_pct, s_iso, s_sev))
+    usage_tbl.add_row("", Text(""), Text(""), Text(""), Text(""))
+    usage_tbl.add_row(*usage_row("7-Day Weekly",   w_pct, w_iso, w_sev))
+
+    # ── extra channels (opus, sonnet, etc.) ───────────────────────────────
+    extra_channels = data.get("extra_channels") or {}
+    if extra_channels:
+        usage_tbl.add_row("", Text(""), Text(""), Text(""), Text(""))
+        for key, val in extra_channels.items():
+            label = key.replace("seven_day_", "").replace("_", " ").title()
+            e_pct  = val.get("utilization")
+            e_iso  = val.get("resets_at")
+            usage_tbl.add_row(*usage_row(f"  {label}", e_pct, e_iso))
+
+    # ── status / meta ─────────────────────────────────────────────────────
+    sep = Text("─" * 62, style="bright_black")
+
+    # Active limits summary
+    active_limits = [l for l in limits if l.get("is_active")]
+    binding = active_limits[0] if active_limits else (limits[0] if limits else None)
+
+    status_tbl = Table(box=None, show_header=False, padding=(0, 1), expand=False)
+    status_tbl.add_column("k", style="dim", width=15)
+    status_tbl.add_column("v",              width=15)
+    status_tbl.add_column("k", style="dim", width=15)
+    status_tbl.add_column("v",              width=12)
+
+    if binding:
+        grp    = (binding.get("group") or "").replace("weekly", "7d").replace("session", "5h")
+        status_tbl.add_row(
+            "Active limit",  Text(grp, style="cyan"),
+            "Severity",      severity_badge(binding.get("severity")),
+        )
+
+    # Extra usage / spend
+    extra  = data.get("extra_usage") or {}
+    spend  = data.get("spend") or {}
+    if extra.get("is_enabled") and extra.get("used_credits") is not None:
+        ccy    = extra.get("currency") or "USD"
+        used   = (extra["used_credits"] or 0) / (10 ** (extra.get("decimal_places") or 2))
+        limit_ = extra.get("monthly_limit")
+        if limit_:
+            lim = limit_ / (10 ** (extra.get("decimal_places") or 2))
+            status_tbl.add_row(
+                "Extra usage",
+                Text(f"${used:.2f} / ${lim:.2f} {ccy}", style="yellow"),
+                "", Text(""),
+            )
+        else:
+            status_tbl.add_row("Extra usage", Text(f"${used:.2f} {ccy}", style="yellow"),
+                               "", Text(""))
+
+    # ── assemble ───────────────────────────────────────────────────────────
+    body = Table.grid(padding=(0, 0))
+    body.add_row(usage_tbl)
+    body.add_row(sep)
+    body.add_row(status_tbl)
+
+    return Panel(
+        body,
+        title=title,
+        border_style="bright_black",
+        padding=(1, 2),
+    )
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def main():
+    ap = argparse.ArgumentParser(
+        prog="claude-usage",
+        description="Terminal dashboard for Claude API usage",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "examples:\n"
+            "  claude-usage          show current usage\n"
+            "  claude-usage -w       watch mode, refresh every 60s\n"
+            "  claude-usage -w 30    watch mode, refresh every 30s\n"
+            "  claude-usage -r       force refresh (bypass cache)"
+        ),
+    )
+    ap.add_argument("-w", "--watch",   nargs="?", const=60, type=int, metavar="SEC",
+                    help="watch mode — refresh every SEC seconds (default 60)")
+    ap.add_argument("-r", "--refresh", action="store_true",
+                    help="force refresh — bypass the 300s cache")
+    args = ap.parse_args()
+
+    if args.watch is not None:
+        interval = max(10, args.watch)
+        force    = args.refresh
+        try:
+            data = get_data(force_refresh=force)
+            with Live(build_dashboard(data), console=console,
+                      refresh_per_second=1, screen=False) as live:
+                while True:
+                    time.sleep(interval)
+                    data = get_data(force_refresh=True)
+                    live.update(build_dashboard(data))
+        except KeyboardInterrupt:
+            pass
+    else:
+        data = get_data(force_refresh=args.refresh)
+        console.print(build_dashboard(data))
+
+
+if __name__ == "__main__":
+    main()
