@@ -1,9 +1,11 @@
-/* SOC Claude Monitor — popup logic */
+/* QuotaWatch — popup logic */
 'use strict';
 
 let els;
 let statusState = {};
-let textTimerId = null;
+let textTimerId  = null;
+let activeProvider = null;   // null = single-provider (no tabs)
+let allUsageBars   = [];     // full unfiltered list from last updateData
 
 /**
  * Bootstrap: inject translations, set static text, bind events, render initial data.
@@ -41,6 +43,7 @@ function init(config) {
     });
 
     els = {
+        providerTabs:    document.getElementById('providerTabs'),
         accountSection:  document.getElementById('accountSection'),
         emailRow:        document.getElementById('emailRow'),
         emailValue:      document.getElementById('emailValue'),
@@ -58,8 +61,9 @@ function init(config) {
         statusText:      document.getElementById('statusText'),
     };
 
-    // Keep translations for live status timer
+    // Keep translations and last data for tab switching
     window._t = t;
+    window._lastData = config.data;
 
     updateData(config.data);
     requestAnimationFrame(() => document.body.classList.add('open'));
@@ -67,49 +71,100 @@ function init(config) {
 
 function refreshDone(config) {
     document.getElementById('refreshBtn').classList.remove('spinning');
+    window._lastData = config.data;
     updateData(config.data);
 }
 
 function updateData(data) {
-    // Account section
-    const hasProfile = !!data.profile;
+    // Build / refresh tabs if providers changed
+    _initTabs(data.providers || []);
+
+    // Store full bar list for tab switching
+    allUsageBars = data.usage || [];
+
+    _renderForActiveProvider(data);
+    updateStatus(data.status);
+}
+
+function _renderForActiveProvider(data) {
+    const onClaude = !activeProvider || activeProvider === 'Claude';
+
+    // Account section — per-provider profile
+    const profiles = data.provider_profiles || {};
+    const profileKey = activeProvider || 'Claude';
+    const prof = profiles[profileKey] || (onClaude ? data.profile : null);
+    const hasProfile = !!(prof && (prof.email || prof.plan));
     els.accountSection.classList.toggle('visible', hasProfile);
     if (hasProfile) {
-        els.emailValue.textContent    = data.profile.email || '';
-        els.emailRow.style.display    = data.profile.email    ? '' : 'none';
-        els.planValue.textContent     = data.profile.plan  || '';
-        els.planRow.style.display     = data.profile.plan     ? '' : 'none';
+        els.emailValue.textContent = prof.email || '';
+        els.emailRow.style.display = prof.email ? '' : 'none';
+        els.planValue.textContent  = prof.plan  || '';
+        els.planRow.style.display  = prof.plan  ? '' : 'none';
     }
 
-    // Usage bars
-    const hasUsage = !!(data.usage && data.usage.length);
+    // Usage bars — filtered to active provider
+    const bars = activeProvider
+        ? allUsageBars.filter(b => b.provider === activeProvider)
+        : allUsageBars;
+    const hasUsage = !!bars.length;
     els.usageSection.classList.toggle('visible', hasUsage);
-    if (hasUsage) updateUsageBars(data.usage);
+    if (hasUsage) updateUsageBars(bars);
 
-    // Extra usage
-    const hasExtra = !!data.extra;
+    // Extra usage (Claude-only)
+    const hasExtra = !!(data.extra && onClaude);
     els.extraSection.classList.toggle('visible', hasExtra);
     if (hasExtra) {
-        els.extraSpent.textContent    = data.extra.spent_text;
-        els.extraPct.textContent      = data.extra.pct_text;
-        els.extraPct.className        = 'bar-pct ok';
-        els.extraFill.style.width     = `${data.extra.fill_pct * 100}%`;
+        els.extraSpent.textContent = data.extra.spent_text;
+        els.extraPct.textContent   = data.extra.pct_text;
+        els.extraPct.className     = 'bar-pct ok';
+        els.extraFill.style.width  = `${data.extra.fill_pct * 100}%`;
     }
 
-    // Installs
-    const hasInstalls = !!(data.installations && data.installations.length);
+    // Installs (Claude-only)
+    const hasInstalls = !!(data.installations && data.installations.length && onClaude);
     els.installSection.classList.toggle('visible', hasInstalls);
     if (hasInstalls) {
         els.installRows.replaceChildren(...data.installations.map(inst => {
             const row = document.createElement('div');
-            const dt  = document.createElement('dt');  dt.textContent = inst.name;
-            const dd  = document.createElement('dd');  dd.textContent = inst.version;
+            const dt  = document.createElement('dt'); dt.textContent = inst.name;
+            const dd  = document.createElement('dd'); dd.textContent = inst.version;
             row.append(dt, dd);
             return row;
         }));
     }
+}
 
-    updateStatus(data.status);
+function _initTabs(providers) {
+    if (providers.length <= 1) {
+        els.providerTabs.classList.remove('visible');
+        activeProvider = null;
+        return;
+    }
+    // Rebuild tabs only when provider list changes
+    const existing = [...els.providerTabs.querySelectorAll('.provider-tab')].map(t => t.dataset.provider);
+    if (JSON.stringify(existing) === JSON.stringify(providers)) return;
+
+    els.providerTabs.replaceChildren(...providers.map((name, i) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'provider-tab' + (i === 0 ? ' active' : '');
+        btn.dataset.provider = name;
+        btn.textContent = name;
+        btn.addEventListener('click', () => _switchTab(name));
+        return btn;
+    }));
+    els.providerTabs.classList.add('visible');
+    if (!activeProvider || !providers.includes(activeProvider)) {
+        activeProvider = providers[0];
+    }
+}
+
+function _switchTab(name) {
+    activeProvider = name;
+    for (const tab of els.providerTabs.querySelectorAll('.provider-tab')) {
+        tab.classList.toggle('active', tab.dataset.provider === name);
+    }
+    _renderForActiveProvider(window._lastData);
 }
 
 // ── Bar helpers ──────────────────────────────────────────────────────────────
@@ -125,7 +180,6 @@ function _barMeta(fillPct, isWarn) {
 }
 
 function updateUsageBars(entries) {
-    // Rebuild when count changes
     if (entries.length !== els.usageBars.children.length) {
         els.usageBars.replaceChildren(...entries.map(_createBar));
         requestAnimationFrame(() => {

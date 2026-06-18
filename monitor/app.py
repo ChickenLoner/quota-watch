@@ -2,19 +2,21 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import threading
 import time
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import pystray  # type: ignore[import-untyped]
 
-from .api import fetch_profile, fetch_usage, quota_fields, read_token
+from .providers.base import UsageSnapshot
+from .providers.claude import ClaudeProvider, read_token
+from .providers.codex import CodexProvider
+from .providers.windsurf import WindsurfProvider
 from .autostart import is_enabled as autostart_is_enabled, set_enabled as autostart_set, sync_path as autostart_sync
 from .formatting import countdown_short, elapsed_pct, field_period
 from .tray import create_icon, create_status_icon, taskbar_is_light, watch_theme
@@ -25,7 +27,6 @@ POLL_ERROR    = 30
 
 _STATUS_CACHE = Path.home() / '.claude' / 'cache' / 'soc-monitor-status.json'
 
-# Default alert thresholds per field key (prefix match for variants)
 _THRESHOLDS: dict[str, list[float]] = {
     'five_hour': [50, 80, 95],
     'seven_day': [95],
@@ -35,7 +36,6 @@ _THRESHOLDS: dict[str, list[float]] = {
 def _thresholds_for(key: str) -> list[float]:
     if key in _THRESHOLDS:
         return _THRESHOLDS[key]
-    # Match base period (e.g. 'seven_day_sonnet' -> 'seven_day')
     parts = key.split('_', 2)
     if len(parts) >= 2:
         base = f'{parts[0]}_{parts[1]}'
@@ -46,7 +46,7 @@ def _thresholds_for(key: str) -> list[float]:
 
 @dataclass
 class CacheSnapshot:
-    usage: dict[str, Any]
+    snapshots: dict[str, UsageSnapshot]   # keyed by provider_id
     profile: dict[str, Any] | None
     last_success_time: float | None
     last_error: str | None
@@ -56,7 +56,9 @@ class App:
     """Tray application with adaptive polling, threshold alerts, and restart support."""
 
     def __init__(self) -> None:
-        self._usage:              dict[str, Any] = {}
+        self._claude              = ClaudeProvider()
+        self._providers           = [self._claude, CodexProvider(), WindsurfProvider()]
+        self._snapshots:          dict[str, UsageSnapshot] = {}
         self._profile:            dict[str, Any] | None = None
         self._last_success_time:  float | None = None
         self._last_error:         str | None = None
@@ -68,14 +70,13 @@ class App:
         self._popup_closed_at  = 0.0
         self.next_poll_time:   float | None = None
 
-        # Alert state
-        self._prev_utilization:   dict[str, float] = {}
+        # Alert state — keyed by "{provider_id}:{field_key}"
+        self._prev_utilization:    dict[str, float] = {}
         self._notified_thresholds: dict[str, float] = {}
-        self._first_update_done   = False
+        self._first_update_done    = False
 
-        # Adaptive polling
-        self._fast_polls  = 0
-        self._running     = True
+        self._fast_polls       = 0
+        self._running          = True
         self.restart_requested = False
 
         self._light_taskbar = taskbar_is_light()
@@ -83,9 +84,9 @@ class App:
         frozen = getattr(sys, 'frozen', False)
 
         self.icon = pystray.Icon(
-            'soc_monitor',
+            'quota_watch',
             icon=create_icon(0, 0),
-            title='Claude Monitor',
+            title='QuotaWatch',
             menu=pystray.Menu(
                 pystray.MenuItem('Show Status', self._on_show, default=True),
                 pystray.Menu.SEPARATOR,
@@ -108,7 +109,7 @@ class App:
     def cache_snapshot(self) -> CacheSnapshot:
         with self._lock:
             return CacheSnapshot(
-                usage=dict(self._usage),
+                snapshots=dict(self._snapshots),
                 profile=self._profile,
                 last_success_time=self._last_success_time,
                 last_error=self._last_error,
@@ -120,8 +121,8 @@ class App:
         icon.visible = True
         if getattr(sys, 'frozen', False):
             autostart_sync()
-        if not read_token():
-            icon.notify('No token - run: claude auth login', 'Claude Monitor')
+        if not self._claude.is_available():
+            icon.notify('Claude: no token - run: claude auth login', 'QuotaWatch')
         watch_theme(self._on_theme_changed)
         self._ensure_profile()
         self._poll_loop()
@@ -157,29 +158,43 @@ class App:
         if not self._lock.acquire(blocking=False):
             return
         try:
-            data = fetch_usage()
+            new_snapshots: dict[str, UsageSnapshot] = {}
+            for provider in self._providers:
+                if provider.is_available():
+                    new_snapshots[provider.provider_id] = provider.fetch()
         finally:
             self._lock.release()
 
-        if 'error' in data:
-            self._last_error = data['error']
+        # Separate successes from failures
+        ok      = {pid: s for pid, s in new_snapshots.items() if not s.error}
+        failed  = {pid: s for pid, s in new_snapshots.items() if s.error}
+
+        if not ok and failed:
+            errors = ', '.join(f'{pid}: {s.error}' for pid, s in failed.items())
+            self._last_error = errors
             self._render_tray(error=True)
             return
 
         with self._lock:
-            self._last_error        = None
+            self._snapshots.update(new_snapshots)
             self._last_success_time = time.time()
-            self._usage             = data
+            # Clear overall error if at least one provider succeeded
+            self._last_error = None
 
-        fields  = quota_fields(data)
-        pct_map = {k: v.get('utilization', 0) or 0 for k, v in fields}
+        # Build composite pct_map: "{provider_id}:{field_key}" -> utilization
+        pct_map: dict[str, float] = {}
+        for pid, snap in ok.items():
+            for f in snap.fields:
+                pct_map[f'{pid}:{f.key}'] = f.utilization
 
         self._check_reset_alerts(pct_map)
-        self._check_threshold_alerts(data, pct_map)
+        self._check_threshold_alerts(ok, pct_map)
 
-        # Adaptive fast-poll when primary field is rising
-        primary_pct  = pct_map.get('five_hour', 0)
-        primary_prev = self._prev_utilization.get('five_hour')
+        # Adaptive fast-poll: trigger when Claude's session field is rising
+        claude_snap  = ok.get('claude')
+        primary_key  = 'claude:five_hour'
+        primary_pct  = pct_map.get(primary_key, 0)
+        primary_prev = self._prev_utilization.get(primary_key)
         if primary_prev is not None and primary_pct > primary_prev:
             self._fast_polls = 3
         elif self._fast_polls > 0:
@@ -188,103 +203,130 @@ class App:
         self._prev_utilization  = pct_map
         self._first_update_done = True
         self._render_tray(error=False)
-        self._write_status_cache(fields)
+        self._write_status_cache(ok)
 
     # ── Alerts ───────────────────────────────────────────────────────────────
 
     def _check_reset_alerts(self, pct_map: dict[str, float]) -> None:
         """Notify when a nearly-exhausted quota resets (usage drops)."""
-        for key, pct in pct_map.items():
-            prev = self._prev_utilization.get(key)
+        for composite_key, pct in pct_map.items():
+            prev = self._prev_utilization.get(composite_key)
             if prev is None:
                 continue
 
-            # Any other quota at >=99% blocks the "reset" interpretation
             any_blocking = any(
                 other_pct >= 99
                 for other_key, other_pct in pct_map.items()
-                if other_key != key
+                if other_key != composite_key
             )
 
-            period = field_period(key)
+            field_key = composite_key.split(':', 1)[1] if ':' in composite_key else composite_key
+            period    = field_period(field_key)
             reset_threshold = 95 if (period and period <= 5 * 3600) else 98
             if prev > reset_threshold and pct < prev and not any_blocking:
-                self.icon.notify('Quota reset - usage cleared', 'Claude Monitor')
-                self._notified_thresholds[key] = 0
+                self.icon.notify('Quota reset - usage cleared', 'QuotaWatch')
+                self._notified_thresholds[composite_key] = 0
 
-    def _check_threshold_alerts(self, data: dict[str, Any], pct_map: dict[str, float]) -> None:
+    def _check_threshold_alerts(
+        self,
+        ok: dict[str, UsageSnapshot],
+        pct_map: dict[str, float],
+    ) -> None:
         """Notify when usage crosses a configured threshold."""
-        for key, pct in pct_map.items():
-            thresholds = _thresholds_for(key)
+        field_lookup: dict[str, Any] = {}
+        for pid, snap in ok.items():
+            for f in snap.fields:
+                field_lookup[f'{pid}:{f.key}'] = f
+
+        for composite_key, pct in pct_map.items():
+            field_key = composite_key.split(':', 1)[1] if ':' in composite_key else composite_key
+            thresholds = _thresholds_for(field_key)
             if not thresholds:
                 continue
 
-            exceeded       = [t for t in thresholds if pct >= t]
-            highest        = max(exceeded) if exceeded else 0
-            last_notified  = self._notified_thresholds.get(key, 0)
+            exceeded      = [t for t in thresholds if pct >= t]
+            highest       = max(exceeded) if exceeded else 0
+            last_notified = self._notified_thresholds.get(composite_key, 0)
 
             if highest > last_notified:
-                # Time-aware: skip alert if usage is behind elapsed time
-                entry  = data.get(key) or {}
-                period = field_period(key)
-                if period:
-                    time_pct = elapsed_pct(entry.get('resets_at', ''), period)
+                f      = field_lookup.get(composite_key)
+                period = field_period(field_key)
+                if period and f:
+                    time_pct = elapsed_pct(f.resets_at or '', period)
                     if time_pct is not None and pct <= time_pct:
-                        self._notified_thresholds[key] = highest
+                        self._notified_thresholds[composite_key] = highest
                         continue
 
-                label = key.replace('_', ' ').upper()
-                self.icon.notify(
-                    f'{label}: {pct:.0f}% used',
-                    'Claude Monitor - Usage Alert',
-                )
-                self._notified_thresholds[key] = highest
+                pid   = composite_key.split(':', 1)[0] if ':' in composite_key else ''
+                label = f'{pid.upper()}: {field_key.replace("_", " ").upper()}' if pid else field_key.upper()
+                self.icon.notify(f'{label}: {pct:.0f}% used', 'QuotaWatch - Usage Alert')
+                self._notified_thresholds[composite_key] = highest
 
             elif highest < last_notified:
-                # Usage dropped below last threshold (reset) - allow re-alerting
-                self._notified_thresholds[key] = highest
+                self._notified_thresholds[composite_key] = highest
 
     # ── Rendering ────────────────────────────────────────────────────────────
 
     def _render_tray(self, error: bool) -> None:
         if error:
             self.icon.icon  = create_status_icon('!')
-            self.icon.title = f'Claude Monitor - {self._last_error}'
+            self.icon.title = f'QuotaWatch - {self._last_error}'
             return
 
-        fields    = quota_fields(self._usage)
-        pcts      = [v.get('utilization', 0) or 0 for _, v in fields]
-        top       = pcts[0] if len(pcts) > 0 else 0
-        bot       = pcts[1] if len(pcts) > 1 else 0
-        countdown = countdown_short(fields[0][1].get('resets_at', '')) if fields else ''
+        # Collect all fields sorted by utilization desc
+        all_fields = [
+            (snap.provider_name, f)
+            for snap in self._snapshots.values()
+            if not snap.error
+            for f in snap.fields
+        ]
+        all_fields.sort(key=lambda x: x[1].utilization, reverse=True)
+
+        top       = all_fields[0][1].utilization if len(all_fields) > 0 else 0
+        bot       = all_fields[1][1].utilization if len(all_fields) > 1 else 0
+        countdown = countdown_short(all_fields[0][1].resets_at or '') if all_fields else ''
 
         self.icon.icon  = create_icon(top, bot, countdown=countdown)
-        self.icon.title = self._build_tooltip(fields)
+        self.icon.title = self._build_tooltip()
 
-    def _build_tooltip(self, fields: list) -> str:
-        if not fields:
-            return 'Claude Monitor'
-        from .api import field_label
-        parts = []
-        for k, v in fields[:3]:
-            pct    = v.get('utilization', 0) or 0
-            cd     = countdown_short(v.get('resets_at', ''))
-            suffix = f'  -{cd}' if cd else ''
-            parts.append(f'{field_label(k)}: {pct:.0f}%{suffix}')
-        return '\n'.join(parts)
+    def _build_tooltip(self) -> str:
+        lines = []
+        for snap in self._snapshots.values():
+            if snap.error or not snap.fields:
+                continue
+            f   = snap.fields[0]
+            cd  = countdown_short(f.resets_at or '')
+            suf = f'  -{cd}' if cd else ''
+            lines.append(f'{snap.provider_name}: {f.label} {f.utilization:.0f}%{suf}')
+        return '\n'.join(lines) if lines else 'QuotaWatch'
 
-    def _write_status_cache(self, fields: list) -> None:
+    def _write_status_cache(self, ok: dict[str, UsageSnapshot]) -> None:
         """Write quota snapshot to ~/.claude/cache/ for statusline consumers."""
         payload = {
             'updated': int(time.time()),
+            'providers': {
+                pid: {
+                    'fields': [
+                        {
+                            'key':       f.key,
+                            'pct':       round(f.utilization),
+                            'resets_at': f.resets_at or '',
+                            'countdown': countdown_short(f.resets_at or ''),
+                        }
+                        for f in snap.fields
+                    ],
+                }
+                for pid, snap in ok.items()
+            },
+            # Keep legacy 'fields' key for existing statusline scripts (Claude primary only)
             'fields': [
                 {
-                    'key':       k,
-                    'pct':       round(v.get('utilization', 0) or 0),
-                    'resets_at': v.get('resets_at', '') or '',
-                    'countdown': countdown_short(v.get('resets_at', '') or ''),
+                    'key':       f.key,
+                    'pct':       round(f.utilization),
+                    'resets_at': f.resets_at or '',
+                    'countdown': countdown_short(f.resets_at or ''),
                 }
-                for k, v in fields
+                for f in (ok.get('claude', UsageSnapshot('', '', [])).fields)
             ],
         }
         try:
@@ -327,7 +369,7 @@ class App:
         current_token = read_token()
         if self._profile is not None and self._profile_token == current_token:
             return
-        profile = fetch_profile()
+        profile = self._claude.fetch_profile()
         with self._lock:
             self._profile       = profile
             self._profile_token = current_token

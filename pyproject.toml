@@ -1,7 +1,7 @@
 [project]
-name = "soc-claude-monitor"
-version = "0.1.0"
-description = "SOC-themed Claude API usage monitor"
+name = "quota-watch"
+version = "0.2.0"
+description = "Multi-provider AI quota monitor (Claude, OpenAI Codex, Windsurf)"
 requires-python = ">=3.11"
 dependencies = [
     "pystray>=0.19",
@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.scripts]
-soc-monitor = "monitor.__main__:main"
+quota-watch = "monitor.__main__:main"
 
 [dependency-groups]
 dev = [

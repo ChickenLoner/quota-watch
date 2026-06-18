@@ -116,6 +116,40 @@ header > .header-right > button:hover { color: var(--fg); }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ── Provider tabs ──────────────────────────────────── */
+#providerTabs {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid var(--line);
+}
+#providerTabs.visible { display: flex; }
+
+.provider-tab {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  padding: 3px 10px 4px;
+  color: var(--fg-3);
+  background: transparent;
+  border: 1px solid var(--line2);
+  cursor: pointer;
+  user-select: none;
+  transition: color .12s, background .12s, border-color .12s;
+}
+.provider-tab:hover {
+  color: var(--fg-2);
+  border-color: var(--fg-4);
+}
+.provider-tab.active {
+  color: var(--bg);
+  background: var(--cy);
+  border-color: var(--cy);
+}
+
 /* ── Sections ───────────────────────────────────────── */
 section, footer {
   display: none;

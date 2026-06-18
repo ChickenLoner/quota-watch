@@ -30,7 +30,7 @@ def _run_app() -> None:
     except Exception:
         ctypes.windll.user32.MessageBoxW(
             0, traceback.format_exc()[:2000],
-            'SOC Monitor - Error', 0x10,
+            'QuotaWatch - Error', 0x10,
         )
     finally:
         for win in list(webview.windows):

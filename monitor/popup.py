@@ -16,7 +16,6 @@ _WS_EX_TOOLWINDOW   = 0x00000080
 import webview  # type: ignore[import-untyped]
 
 from . import __version__
-from .api import field_label, quota_fields
 from .formatting import elapsed_pct, field_period, midnight_positions, time_until
 
 if TYPE_CHECKING:
@@ -28,7 +27,7 @@ _POPUP_W   = 340
 _BASELINE_DPI = 96
 
 _TRANSLATIONS = {
-    'title':              'CLAUDE MONITOR',
+    'title':              'QUOTA WATCH',
     'account':            'OPERATOR',
     'email':              'EMAIL',
     'plan':               'CLEARANCE',
@@ -98,46 +97,70 @@ def _tray_position(popup_w: int, popup_h: int) -> tuple[int, int]:
         return 40, 40
 
 
+def _bar_entry(provider_name: str, f: Any) -> dict[str, Any]:
+    pct      = f.utilization
+    resets   = f.resets_at or ''
+    period   = field_period(f.key)
+    time_pct = elapsed_pct(resets, period) if period else None
+    warn     = pct >= 100 or (time_pct is not None and pct > time_pct)
+    marker   = max(0.0, min(1.0, time_pct / 100)) if time_pct is not None else None
+    return {
+        'provider':    provider_name,
+        'label':       f.label,
+        'pct_text':    f'{pct:.0f}%',
+        'fill_pct':    max(0.0, min(1.0, pct / 100)),
+        'warn':        warn,
+        'reset_text':  time_until(resets) if resets else '',
+        'resets_at':   resets,
+        'midnights':   midnight_positions(resets, period) if period else [],
+        'marker_rel':  marker,
+    }
+
+
 def _build_payload(app: App) -> dict[str, Any]:
     """Build the JSON config+data payload for the popup JS init()."""
-    snap       = app.cache_snapshot()
-    usage_data = snap.usage or {}
+    snap      = app.cache_snapshot()
+    snapshots = snap.snapshots  # dict[provider_id, UsageSnapshot]
 
-    # Profile
-    profile = None
+    # Per-provider profiles (email + plan) keyed by provider_name
+    provider_profiles: dict[str, Any] = {}
     if snap.profile:
         account = snap.profile.get('account', {})
         org     = snap.profile.get('organization', {})
         plan    = org.get('organization_type', '').replace('_', ' ').title()
-        profile = {
+        provider_profiles['Claude'] = {
             'email': account.get('email', ''),
             'plan':  plan or '',
         }
+    for pid, s in snapshots.items():
+        if pid == 'claude' or s.error:
+            continue
+        email     = s.extras.get('email', '')
+        plan_raw  = s.extras.get('plan_type') or s.extras.get('plan_name') or ''
+        plan_disp = plan_raw.replace('_', ' ').title()
+        if email or plan_disp:
+            provider_profiles[s.provider_name] = {'email': email, 'plan': plan_disp}
 
-    # Usage bars
+    # Keep legacy single `profile` key (Claude) for backward compat
+    profile = provider_profiles.get('Claude')
+
+    # Usage bars — one section per provider, ordered: claude, codex, windsurf, others
+    _ORDER = ['claude', 'codex', 'windsurf']
+    ordered_ids = [pid for pid in _ORDER if pid in snapshots] + \
+                  [pid for pid in snapshots if pid not in _ORDER]
+
     usage_bars: list[dict[str, Any]] = []
-    for key, entry in quota_fields(usage_data):
-        pct      = entry.get('utilization', 0) or 0
-        resets   = entry.get('resets_at', '')
-        period   = field_period(key)
-        time_pct = elapsed_pct(resets, period) if period else None
-        warn     = pct >= 100 or (time_pct is not None and pct > time_pct)
-        marker   = max(0.0, min(1.0, time_pct / 100)) if time_pct is not None else None
+    for pid in ordered_ids:
+        snap_data = snapshots[pid]
+        if snap_data.error or not snap_data.fields:
+            continue
+        for f in snap_data.fields:
+            usage_bars.append(_bar_entry(snap_data.provider_name, f))
 
-        usage_bars.append({
-            'label':       field_label(key),
-            'pct_text':    f'{pct:.0f}%',
-            'fill_pct':    max(0.0, min(1.0, pct / 100)),
-            'warn':        warn,
-            'reset_text':  time_until(resets) if resets else '',
-            'resets_at':   resets,
-            'midnights':   midnight_positions(resets, period) if period else [],
-            'marker_rel':  marker,
-        })
-
-    # Extra usage
+    # Extra usage (Anthropic/Claude-specific)
     extra = None
-    extra_data = usage_data.get('extra_usage')
+    claude_snap = snapshots.get('claude')
+    extra_data  = claude_snap.extras.get('extra_usage') if claude_snap else None
     if extra_data and extra_data.get('is_enabled'):
         limit = extra_data.get('monthly_limit', 0) or 0
         if limit > 0:
@@ -157,7 +180,8 @@ def _build_payload(app: App) -> dict[str, Any]:
         installs = []
 
     # Status
-    if not usage_data:
+    has_any_data = any(not s.error and s.fields for s in snapshots.values())
+    if not has_any_data:
         if snap.last_error:
             status: dict[str, Any] = {'text': snap.last_error[:120], 'is_error': True}
         else:
@@ -170,12 +194,21 @@ def _build_payload(app: App) -> dict[str, Any]:
             'error':             snap.last_error[:120] if snap.last_error else None,
         }
 
+    # Provider tab names (only providers with actual data, in display order)
+    provider_names = [
+        snapshots[pid].provider_name
+        for pid in ordered_ids
+        if pid in snapshots and not snapshots[pid].error and snapshots[pid].fields
+    ]
+
     return {
         't':           _TRANSLATIONS,
         'app_version': f'v{__version__}',
         'data': {
-            'profile':       profile,
-            'usage':         usage_bars,
+            'providers':         provider_names,
+            'provider_profiles': provider_profiles,
+            'profile':           profile,
+            'usage':             usage_bars,
             'extra':         extra,
             'installations': installs,
             'status':        status,
@@ -224,7 +257,7 @@ class UsagePopup:
         self._app          = app
         self._closed       = threading.Event()
         self._last_height  = 400
-        self._unique_title = f'__soc_monitor_{id(self)}__'
+        self._unique_title = f'__quota_watch_{id(self)}__'
 
         api = _PopupApi(self)
 
