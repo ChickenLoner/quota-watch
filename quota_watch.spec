@@ -30,7 +30,6 @@ a = Analysis(
         'PIL._imagingcms', 'PIL._imagingmath', 'PIL._imagingtk', 'PIL._imagingmorph',
         'setuptools', '_distutils_hack',
         'multiprocessing',
-        'sqlite3',
     ],
     noarchive=False,
 )
