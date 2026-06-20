@@ -250,6 +250,15 @@ html, body {
 .qw-row .mini > div { height:100%; border-radius:5px; background:var(--bar); transition:width .5s ease; }
 .qw-row .pct { font-family:var(--font-mono); font-size:12px; font-weight:700; color:var(--c); flex:none; min-width:30px; text-align:right; }
 
+/* ---- Multi-bar compact rows (providers with independent quota groups) -- */
+.qw-row-multi { flex:1; display:flex; flex-direction:column; gap:5px; min-width:0; }
+.qw-row-multi .mini { flex:1; min-width:28px; }
+.qw-row-mini-item { display:flex; align-items:center; gap:8px; }
+.qw-row-mini-item .mini-lbl { font-family:var(--font-mono); font-size:8.5px; letter-spacing:.05em;
+  color:var(--c); flex:none; min-width:58px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.qw-row-mini-item .pct { font-family:var(--font-mono); font-size:11px; font-weight:700;
+  color:var(--c); flex:none; min-width:34px; text-align:right; }
+
 /* ---- Error / empty-provider state (auth_error, no data) --------------- */
 .qw-error { display:flex; align-items:flex-start; gap:9px; padding:11px 12px; margin:0 16px 6px;
   background:var(--err-badge-bg); border:1px solid var(--err-badge-bd); border-radius:9px; }

@@ -262,13 +262,23 @@ function _renderGrid() {
 
   const cards = provs.map((p, i) => {
     if (state.compact) {
-      const w   = _worstBar(p);
       const sev = p.statusSev;
-      const miniHtml = w
-        ? `<div class="mini sev-${w.sev}"><div style="width:${Math.min(100, w.pct)}%"></div></div>
-           <span class="pct sev-${w.sev}" style="color:var(--c)">${Math.round(w.pct)}%</span>`
-        : `<div class="mini sev-err"><div style="width:0%"></div></div>
-           <span class="pct sev-err" style="color:var(--c)">—</span>`;
+      let miniHtml;
+      if (!p.bars || p.bars.length === 0) {
+        miniHtml = `<div class="mini sev-err"><div style="width:0%"></div></div>
+                    <span class="pct sev-err" style="color:var(--c)">—</span>`;
+      } else if (p.bars.length === 1) {
+        const w = p.bars[0];
+        miniHtml = `<div class="mini sev-${w.sev}"><div style="width:${Math.min(100, w.pct)}%"></div></div>
+                    <span class="pct sev-${w.sev}" style="color:var(--c)">${Math.round(w.pct)}%</span>`;
+      } else {
+        miniHtml = `<div class="qw-row-multi">${p.bars.map(b =>
+          `<div class="qw-row-mini-item sev-${b.sev}">
+            <span class="mini-lbl">${esc(b.label)}</span>
+            <div class="mini"><div style="width:${Math.min(100, b.pct)}%"></div></div>
+            <span class="pct">${Math.round(b.pct)}%</span>
+          </div>`).join('')}</div>`;
+      }
       return `<div class="qw-row sev-${sev}" style="--i:${i}">
         <span class="qw-dot" style="background:${esc(p.dot)}"></span>
         <span class="nm">${esc(p.name)}</span>
