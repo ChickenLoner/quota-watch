@@ -35,11 +35,13 @@ def _agy_local_ports() -> list[int]:
             ['powershell', '-NoProfile', '-Command',
              '(Get-Process agy -ErrorAction SilentlyContinue).Id'],
             capture_output=True, text=True, timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
         pids = {p.strip() for p in ps.stdout.strip().split() if p.strip()}
         if not pids:
             return []
-        ns = subprocess.run(['netstat', '-ano'], capture_output=True, text=True, timeout=5)
+        ns = subprocess.run(['netstat', '-ano'], capture_output=True, text=True, timeout=5,
+                            creationflags=subprocess.CREATE_NO_WINDOW)
         ports: list[int] = []
         for line in ns.stdout.splitlines():
             m = re.search(r'127\.0\.0\.1:(\d+)\s+\S+\s+LISTENING\s+(\d+)', line)
