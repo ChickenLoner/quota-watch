@@ -39,7 +39,7 @@ _PROVIDER_DOTS = {
 _CHANGELOG_URLS: dict[str, str] = {
     'claude':      'https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md',
     'codex':       'https://github.com/openai/codex/releases',
-    'antigravity': 'https://antigravity.google',
+    'antigravity': 'https://github.com/google-antigravity/antigravity-cli/blob/main/CHANGELOG.md',
 }
 _CHANGELOG_LABELS: dict[str, str] = {
     'codex':       'CODEX CLI',
