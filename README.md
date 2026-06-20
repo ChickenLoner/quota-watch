@@ -8,8 +8,10 @@ Inspired by [CodexBar](https://github.com/steipete/CodexBar) and [usage-monitor-
 
 ## Features
 
-- **Multi-provider** — Claude, OpenAI Codex, Windsurf; tabs switch between them in the popup
+- **Multi-provider** — Claude, OpenAI Codex, Windsurf, Antigravity; tabs switch between them in the popup
 - **Per-provider account info** — email and plan shown per active tab
+- **Focus / Grid layouts** — Focus mode for single-provider detail; Grid mode for all providers at a glance (with compact density toggle)
+- **Animated transitions** — smooth crossfade + staggered card entrance when switching between Focus ↔ Grid and compact ↔ expanded
 - **Live tray icon** — dual progress bars (top usage + second field) color-coded green → amber → red
 - **Session countdown** — reset timer (e.g. `4h22`) drawn on tray icon in cyan
 - **Severity badges** — NOMINAL / WARNING / CRITICAL / BREACH on each bar
