@@ -15,9 +15,11 @@ _CONFIG_DIR   = Path.home() / '.gemini' / 'antigravity-cli'
 _CRED_TARGET  = 'gemini:antigravity'
 _PROJECTS_FILE = _CONFIG_DIR / 'cache' / 'projects.json'
 
-_QUOTA_URL = 'https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels'
-_TIMEOUT   = 10
-_VERSION   = '1.18.3'
+_QUOTA_URL    = 'https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels'
+_LOAD_URL     = 'https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist'
+_USERINFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo'
+_TIMEOUT      = 10
+_VERSION      = '1.18.3'
 
 
 class _CRED(ctypes.Structure):
@@ -129,8 +131,51 @@ class AntigravityProvider(Provider):
     provider_id   = 'antigravity'
     provider_name = 'Antigravity'
 
+    def __init__(self) -> None:
+        self._account: dict[str, str] = {}   # cached {email, plan} — rarely changes
+
     def is_available(self) -> bool:
         return _CONFIG_DIR.exists()
+
+    def _account_info(self, access_token: str, project_id: str) -> dict[str, str]:
+        """Fetch email (Google userinfo) + plan tier (loadCodeAssist). Cached after first success."""
+        if self._account:
+            return self._account
+        email = ''
+        plan  = ''
+        try:
+            r = requests.get(
+                _USERINFO_URL,
+                headers={'Authorization': f'Bearer {access_token}'},
+                timeout=_TIMEOUT,
+            )
+            if r.ok:
+                email = r.json().get('email', '')
+        except requests.RequestException:
+            pass
+        try:
+            r = requests.post(
+                _LOAD_URL,
+                headers={
+                    'Authorization': f'Bearer {access_token}',
+                    'Content-Type':  'application/json',
+                    'User-Agent':    f'antigravity/{_VERSION} windows/amd64',
+                },
+                json={
+                    'cloudaicompanionProject': project_id,
+                    'metadata': {'ideType': 'ANTIGRAVITY', 'platform': 'WINDOWS_AMD64', 'pluginType': 'GEMINI'},
+                },
+                timeout=_TIMEOUT,
+            )
+            if r.ok:
+                tier = r.json().get('currentTier', {})
+                plan = (tier.get('id') or '').replace('-', ' ').title()
+        except requests.RequestException:
+            pass
+        info = {'email': email, 'plan': plan}
+        if email or plan:
+            self._account = info     # cache only on success
+        return info
 
     def fetch(self) -> UsageSnapshot:
         cred       = _read_cred_json()
@@ -193,4 +238,11 @@ class AntigravityProvider(Provider):
         # Most-used first → primary tray field shows most critical group
         fields.sort(key=lambda f: f.utilization, reverse=True)
 
-        return UsageSnapshot(self.provider_id, self.provider_name, fields)
+        acct   = self._account_info(access_token, project_id)
+        extras: dict[str, Any] = {}
+        if acct.get('email'):
+            extras['email'] = acct['email']
+        if acct.get('plan'):
+            extras['plan_name'] = acct['plan']
+
+        return UsageSnapshot(self.provider_id, self.provider_name, fields, extras=extras)

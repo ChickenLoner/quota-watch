@@ -33,6 +33,7 @@ Current providers: `ClaudeProvider`, `CodexProvider`, `WindsurfProvider`, `Antig
 - Reads token from Win Credential Manager via ctypes `CredReadW`. Token dict has `access_token` + ISO `expiry`.
 - Does **not** self-refresh (would need Antigravity's OAuth client secret — deliberately not shipped). agy refreshes the stored token on its own loop. If `access_token` is missing/expired → `auth_error` snapshot ("Token expired — open Antigravity to refresh").
 - Quota API `cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels` returns ~20 models sharing quota per family → collapsed into 4 groups (`CLAUDE`, `GEMINI PRO`, `GEMINI FLASH`, `GPT-OSS`) by `_aggregate_groups`. Each group shows its most-consumed member. Edit `_GROUPS` to adjust.
+- Email + plan: on first successful poll, fetches email from Google `userinfo` and tier from `loadCodeAssist` (`currentTier.id`), stored in `extras['email']`/`extras['plan_name']` and cached on the instance (`self._account`) so it's not re-fetched every poll.
 - `is_available()` = `~/.gemini/antigravity-cli/` exists. Dormant if Antigravity not installed.
 
 ### Alert keys
