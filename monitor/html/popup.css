@@ -192,6 +192,9 @@ html, body {
 .qw-menu-item.active { background:var(--plan-bg); }
 .qw-menu-item .nm { font-size:12.5px; font-weight:600; min-width:72px; }
 .qw-menu-item .pct { margin-left:auto; font-family:var(--font-mono); font-size:11px; font-weight:700; }
+.qw-menu-multi { margin-left:auto; display:flex; flex-direction:column; gap:3px; min-width:96px; }
+.qw-menu-multi-row { display:flex; align-items:center; gap:6px; }
+.qw-menu-multi-row .lbl { font-family:var(--font-mono); font-size:8px; letter-spacing:.04em; color:var(--faint); flex:1; }
 
 /* ---- Account row (FOCUS) ---------------------------------------------- */
 .qw-account { display:flex; align-items:center; justify-content:space-between; padding:9px 16px 14px; }

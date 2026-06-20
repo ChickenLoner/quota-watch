@@ -198,9 +198,18 @@ function _renderFocus() {
 
   const menu = state.menuOpen ? `<div class="qw-menu">${provs.map(p => {
     const w = _worstBar(p);
-    const pctHtml = w
-      ? `<span class="pct sev-${w.sev}" style="color:var(--c)">${Math.round(w.pct)}%</span>`
-      : `<span class="pct sev-err" style="color:var(--c)">—</span>`;
+    let pctHtml;
+    if (!w) {
+      pctHtml = `<span class="pct sev-err" style="color:var(--c)">—</span>`;
+    } else if (p.bars.length === 1) {
+      pctHtml = `<span class="pct sev-${w.sev}" style="color:var(--c)">${Math.round(w.pct)}%</span>`;
+    } else {
+      pctHtml = `<div class="qw-menu-multi">${p.bars.map(b =>
+        `<div class="qw-menu-multi-row sev-${b.sev}">
+          <span class="lbl">${esc(b.label)}</span>
+          <span class="pct">${Math.round(b.pct)}%</span>
+        </div>`).join('')}</div>`;
+    }
     return `<button class="qw-menu-item${p.id === active.id ? ' active' : ''}" data-pick="${esc(p.id)}">
       <span class="qw-dot" style="background:${esc(p.dot)}"></span>
       <span class="nm">${esc(p.name)}</span>
