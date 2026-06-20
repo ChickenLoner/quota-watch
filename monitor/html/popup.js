@@ -153,7 +153,17 @@ function _extraBlock(extra) {
   </div>`;
 }
 
-function _installsBlock(installs) {
+function _changelogBlock(url, label) {
+  if (!url) return '';
+  return `<div class="qw-installs">
+    <div class="qw-installs-head">
+      <span class="lbl">${esc(label || 'CLI')}</span>
+      <span class="link" data-act="changelog" data-url="${esc(url)}">CHANGELOG</span>
+    </div>
+  </div>`;
+}
+
+function _installsBlock(installs, changelogUrl) {
   if (!installs || installs.length === 0) return '';
   const rows = installs.map(i =>
     `<div class="qw-install-row"><span>${esc(i.name)}</span><span class="ver">${esc(i.version)}</span></div>`
@@ -161,7 +171,7 @@ function _installsBlock(installs) {
   return `<div class="qw-installs">
     <div class="qw-installs-head">
       <span class="lbl">CLAUDE CODE</span>
-      <span class="link" data-act="changelog">CHANGELOG</span>
+      <span class="link" data-act="changelog" data-url="${esc(changelogUrl || '')}">CHANGELOG</span>
     </div>
     ${rows}
   </div>`;
@@ -242,7 +252,9 @@ function _renderFocus() {
     body = `<div class="qw-bars">${active.bars.map(_bigBar).join('')}</div>`;
     if (active.id === 'claude') {
       body += _extraBlock(active.extra);
-      body += _installsBlock(active.installs);
+      body += _installsBlock(active.installs, active.changelog_url);
+    } else {
+      body += _changelogBlock(active.changelog_url, active.changelog_label);
     }
   }
 
@@ -304,7 +316,9 @@ function _renderGrid() {
       let bars = `<div class="qw-card-bars">${p.bars.map(_cardBar).join('')}</div>`;
       if (p.id === 'claude') {
         bars += _extraBlock(p.extra);
-        bars += _installsBlock(p.installs);
+        bars += _installsBlock(p.installs, p.changelog_url);
+      } else {
+        bars += _changelogBlock(p.changelog_url, p.changelog_label);
       }
       cardBody = bars;
     }
@@ -403,7 +417,7 @@ shell.addEventListener('click', (e) => {
     case 'theme':     state.theme = state.theme === 'dark' ? 'light' : 'dark'; state.themeRot += 180; _saveState(); render(); break;
     case 'sync':      _doSync(); break;
     case 'close':     if (typeof pywebview !== 'undefined') pywebview.api.close(); break;
-    case 'changelog': if (typeof pywebview !== 'undefined') pywebview.api.open_url(); break;
+    case 'changelog': if (typeof pywebview !== 'undefined') pywebview.api.open_url(act.dataset.url || ''); break;
   }
 });
 

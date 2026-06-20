@@ -36,7 +36,16 @@ _PROVIDER_DOTS = {
     'antigravity': '#b07ae0',
 }
 
-CHANGELOG_URL = 'https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md'
+_CHANGELOG_URLS: dict[str, str] = {
+    'claude':      'https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md',
+    'codex':       'https://github.com/openai/codex/releases',
+    'antigravity': 'https://antigravity.google',
+}
+_CHANGELOG_LABELS: dict[str, str] = {
+    'codex':       'CODEX CLI',
+    'antigravity': 'AGY CLI',
+}
+CHANGELOG_URL = _CHANGELOG_URLS['claude']
 
 
 class _MonitorInfo(ctypes.Structure):
@@ -180,9 +189,11 @@ def _provider_entry(pid: str, s: Any, claude_profile: dict[str, Any] | None) -> 
         'reAuthHint':  re_auth_hint,
         'errorText':   error_text,
         'statusSev':   worst,
-        'bars':        bars,
-        'extra':       None,
-        'installs':    None,
+        'bars':           bars,
+        'extra':          None,
+        'installs':       None,
+        'changelog_url':  _CHANGELOG_URLS.get(pid),
+        'changelog_label': _CHANGELOG_LABELS.get(pid),
     }
     if pid == 'claude':
         entry['extra'] = _extra_usage(s)
@@ -238,8 +249,8 @@ class _PopupApi:
     def close(self) -> None:
         self._popup._close()
 
-    def open_url(self) -> None:
-        webbrowser.open(CHANGELOG_URL)
+    def open_url(self, url: str = '') -> None:
+        webbrowser.open(url or CHANGELOG_URL)
 
     def refresh(self) -> None:
         """Trigger an immediate data fetch and push updated payload to JS."""
