@@ -93,7 +93,8 @@ def _fields_from_user_status(data: dict[str, Any]) -> tuple[list[QuotaField], di
         else:
             continue
         qi          = mc.get('quotaInfo') or {}
-        remaining   = float(qi.get('remainingFraction', 1.0))
+        # API omits remainingFraction when quota is fully exhausted; treat as 0.0
+        remaining   = float(qi.get('remainingFraction', 0.0))
         utilization = max(0.0, min(100.0, (1.0 - remaining) * 100))
         resets_at   = qi.get('resetTime') or None
         cur = agg.get(grp_key)
