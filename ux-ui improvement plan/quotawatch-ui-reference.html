@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QuotaWatch UI — Reference Implementation</title>
+<!--
+  ============================================================================
+  QuotaWatch popup — VANILLA reference implementation (no framework, no build).
+  This mirrors the target repo's stack: popup.html + popup.css + popup.js.
+  Everything below is split with clear markers so you can lift each part into
+  the matching repo file. Mock provider data lives in MOCK_PAYLOAD at the
+  bottom — replace it with the real payload from monitor/popup.py _build_payload().
+  Open this file directly in any browser to interact with the design.
+  ============================================================================
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- ========================= popup.css STARTS ========================= -->
+<style>
+/* ---- Design tokens (DARK is default on :root) ------------------------ */
+:root {
+  --font-sans:  'Manrope', system-ui, sans-serif;
+  --font-grid:  'Space Grotesk', 'Manrope', sans-serif;
+  --font-mono:  'JetBrains Mono', ui-monospace, Consolas, monospace;
+
+  --bg:          #14161c;
+  --card:        rgba(255,255,255,.03);
+  --card-border: rgba(255,255,255,.06);
+  --border:      rgba(255,255,255,.07);
+  --header-bg:   rgba(255,255,255,.015);
+  --text:        #e7e9ef;
+  --dim:         #8b91a3;
+  --faint:       #5b6071;
+  --track:       rgba(255,255,255,.06);
+  --btn-bg:      rgba(255,255,255,.04);
+  --btn-border:  rgba(255,255,255,.10);
+  --btn-color:   #c9cedd;
+  --btn-hover:   rgba(255,255,255,.09);
+  --close:       #6a7185;
+  --toggle-bg:   rgba(255,255,255,.05);
+  --tag-bg:      rgba(255,255,255,.06);
+  --tag-color:   #8b91a3;
+  --plan-bg:     rgba(154,160,255,.12);
+  --plan-color:  #9aa0ff;
+  --reset-bg:    rgba(255,255,255,.04);
+  --menu-bg:     #1b1e27;
+  --accent:      #9aa0ff;   /* active toggle / tab fill */
+  --accent-on:   #14161c;   /* text on accent */
+  --dot:         #34d399;   /* live pulse dot */
+  --shadow:      0 24px 60px rgba(0,0,0,.40), 0 2px 8px rgba(0,0,0,.30);
+
+  /* severity — bar fill is theme-independent, text/badge differ by theme */
+  --ok-bar:#22c55e;  --warn-bar:#f59e0b;  --crit-bar:#ef4444;
+  --ok-text:#34d399; --warn-text:#fbbf24; --crit-text:#fb7185;
+  --ok-badge-bg:rgba(52,211,153,.12);  --ok-badge-bd:rgba(52,211,153,.30);
+  --warn-badge-bg:rgba(251,191,36,.12); --warn-badge-bd:rgba(251,191,36,.30);
+  --crit-badge-bg:rgba(251,113,133,.12);--crit-badge-bd:rgba(251,113,133,.35);
+
+  /* micro-interaction accents */
+  --sync-cyan:#22d3ee;
+  --sun:#fbbf24;  --sun-glow:rgba(251,191,36,.45);
+  --moon:#818cf8; --moon-glow:rgba(129,140,248,.45);
+}
+[data-theme="light"] {
+  --bg:#f4f5f7; --card:#ffffff; --card-border:#ebedf1; --border:#e2e4e9;
+  --header-bg:#ffffff; --text:#1a1d24; --dim:#8a8f9c; --faint:#9aa0ad; --track:#eef0f3;
+  --btn-bg:#ffffff; --btn-border:#e2e4e9; --btn-color:#6b7180; --btn-hover:#f1f2f5;
+  --close:#9aa0ad; --toggle-bg:#eceef2; --tag-bg:#f1f2f5; --tag-color:#8a8f9c;
+  --plan-bg:#eef0ff; --plan-color:#6b6fd6; --reset-bg:#f1f2f5; --menu-bg:#ffffff;
+  --accent:#6b6fd6; --accent-on:#ffffff; --dot:#16a34a;
+  --shadow:0 24px 60px rgba(40,44,54,.18), 0 2px 8px rgba(40,44,54,.08);
+  --ok-text:#16a34a; --warn-text:#d97706; --crit-text:#dc2626;
+  --ok-badge-bg:#e8f6ed;  --ok-badge-bd:transparent;
+  --warn-badge-bg:#fdf2e3; --warn-badge-bd:transparent;
+  --crit-badge-bg:#fdeaea; --crit-badge-bd:transparent;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+@keyframes qw-pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+@keyframes qw-spin  { to { transform: rotate(360deg) } }
+
+/* page chrome only — NOT part of the popup */
+body { min-height:100vh; display:flex; align-items:center; justify-content:center;
+       background:#e7e5df; font-family:var(--font-sans); padding:48px; }
+
+/* ---- Shell: owns the chrome + the size (width/height) animation -------- */
+.qw-shell {
+  position:relative; overflow:hidden;
+  background:var(--bg); color:var(--text);
+  border:1px solid var(--border); border-radius:14px; box-shadow:var(--shadow);
+  width:360px;                 /* set per layout in JS: focus 360, grid 440 */
+  transition: width .44s cubic-bezier(.32,.72,0,1),
+              height .44s cubic-bezier(.32,.72,0,1),
+              background .4s ease, border-color .4s ease, box-shadow .4s ease;
+}
+/* every inner element cross-fades its colours on theme switch */
+.qw-shell, .qw-shell * {
+  transition: background-color .4s ease, color .4s ease, border-color .4s ease, box-shadow .4s ease;
+}
+.qw-panel { width:360px; }              /* focus */
+.qw-panel.is-grid { width:440px; font-family:var(--font-grid); }
+
+/* ---- Header ----------------------------------------------------------- */
+.qw-header { display:flex; align-items:center; justify-content:space-between; padding:14px 16px; }
+.qw-panel.is-grid .qw-header { padding:15px 18px; background:var(--header-bg); border-bottom:1px solid var(--card-border); }
+.qw-brand { display:flex; align-items:center; gap:10px; }
+.qw-brand .name { font-size:14px; font-weight:700; letter-spacing:-.01em; }
+.qw-panel.is-grid .qw-brand .name { font-size:14.5px; }
+.qw-live { width:8px; height:8px; border-radius:50%; background:var(--dot);
+           box-shadow:0 0 9px var(--dot); animation:qw-pulse 1.8s infinite; }
+.qw-count { font-family:var(--font-mono); font-size:9.5px; font-weight:600;
+            color:var(--faint); letter-spacing:.08em; padding-top:2px; }
+.qw-actions { display:flex; align-items:center; gap:8px; }
+
+/* icon buttons (refresh / theme) */
+.qw-iconbtn { position:relative; width:30px; height:30px; display:flex; align-items:center; justify-content:center;
+  border-radius:9px; border:1px solid var(--btn-border); background:var(--btn-bg); color:var(--btn-color);
+  cursor:pointer; padding:0;
+  transition:border-color .25s ease, box-shadow .25s ease, transform .12s ease, background .25s ease, color .25s ease; }
+.qw-iconbtn:active { transform:scale(.86); }
+.qw-iconbtn .ico { display:inline-flex; align-items:center; justify-content:center; }
+
+/* refresh — cyan glow + spin while syncing, glyph turns on hover */
+.qw-refresh:hover { border-color:var(--sync-cyan); color:var(--sync-cyan); box-shadow:0 0 12px rgba(34,211,238,.30); }
+.qw-refresh .ico { transition:transform .3s ease, color .2s ease; }
+.qw-refresh:hover .ico { transform:rotate(150deg); color:var(--sync-cyan); }
+.qw-refresh.is-syncing { border-color:var(--sync-cyan); background:rgba(34,211,238,.10); box-shadow:0 0 16px rgba(34,211,238,.45); }
+.qw-refresh.is-syncing .ico { color:var(--sync-cyan); filter:drop-shadow(0 0 5px rgba(34,211,238,.75)); animation:qw-spin .7s linear infinite; }
+
+/* theme — sun(amber)/moon(indigo) glow, springy 180° rotate per toggle */
+.qw-theme.is-dark:hover  { border-color:var(--sun);  color:var(--sun);  box-shadow:0 0 12px var(--sun-glow); }
+.qw-theme.is-light:hover { border-color:var(--moon); color:var(--moon); box-shadow:0 0 12px var(--moon-glow); }
+.qw-theme .ico { transition:transform .55s cubic-bezier(.34,1.56,.64,1), color .25s ease; }
+
+.qw-close { color:var(--close); font-size:18px; line-height:1; cursor:pointer; padding:0 2px; user-select:none; }
+
+/* ---- Layout toggle (FOCUS / GRID) + density --------------------------- */
+.qw-toggles { padding:0 16px 10px; }
+.qw-panel.is-grid .qw-toggles { padding:12px 14px 2px; }
+.qw-toggle-row { display:flex; align-items:center; gap:8px; }
+.qw-seg { flex:1; display:flex; gap:3px; background:var(--toggle-bg); border-radius:10px; padding:3px; }
+.qw-seg button { flex:1; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.08em; font-weight:600;
+  padding:7px 0; border:none; border-radius:8px; cursor:pointer; background:transparent; color:var(--dim); }
+.qw-seg button.active { font-weight:700; background:var(--accent); color:var(--accent-on); }
+[data-theme="light"] .qw-seg button.active { background:#fff; color:#1a1d24; box-shadow:0 1px 2px rgba(40,44,54,.12); }
+.qw-density { width:34px; height:34px; display:flex; align-items:center; justify-content:center; font-size:14px;
+  border-radius:8px; cursor:pointer; background:transparent; color:var(--dim); border:1px solid var(--btn-border); }
+.qw-density.active { background:var(--plan-bg); color:var(--plan-color); border-color:transparent; }
+.qw-sort-note { font-family:var(--font-mono); font-size:8.5px; letter-spacing:.1em; color:var(--faint); margin:9px 0 0 2px; }
+
+/* ---- Provider switcher (FOCUS) ---------------------------------------- */
+.qw-switcher-wrap { padding:0 16px 5px; position:relative; }
+.qw-switcher { width:100%; display:flex; align-items:center; gap:9px; padding:8px 11px; border-radius:9px;
+  cursor:pointer; border:1px solid var(--btn-border); background:var(--btn-bg); color:var(--text); }
+.qw-switcher:hover { background:var(--btn-hover); }
+.qw-switcher .nm { font-size:13px; font-weight:700; }
+.qw-switcher .count { margin-left:auto; font-family:var(--font-mono); font-size:9.5px; letter-spacing:.08em; color:var(--faint); }
+.qw-menu { position:absolute; left:16px; right:16px; top:calc(100% + 4px); z-index:30;
+  background:var(--menu-bg); border:1px solid var(--border); border-radius:11px; box-shadow:var(--shadow);
+  max-height:228px; overflow-y:auto; padding:5px; display:flex; flex-direction:column; gap:2px; }
+.qw-menu-item { width:100%; display:flex; align-items:center; gap:9px; padding:8px 9px; border:none; border-radius:7px;
+  cursor:pointer; background:transparent; color:var(--text); font-family:var(--font-sans); }
+.qw-menu-item.active { background:var(--plan-bg); }
+.qw-menu-item .nm { font-size:12.5px; font-weight:600; min-width:72px; }
+.qw-menu-item .pct { margin-left:auto; font-family:var(--font-mono); font-size:11px; font-weight:700; }
+
+/* ---- Account row (FOCUS) ---------------------------------------------- */
+.qw-account { display:flex; align-items:center; justify-content:space-between; padding:9px 16px 14px; }
+.qw-account .email { font-size:12.5px; color:var(--dim); }
+
+/* ---- Badges / chips / dots -------------------------------------------- */
+.qw-dot { width:9px; height:9px; border-radius:3px; flex:none; }
+.qw-plan { font-family:var(--font-mono); font-size:9px; font-weight:600; letter-spacing:.06em;
+  color:var(--plan-color); background:var(--plan-bg); padding:3px 8px; border-radius:5px; }
+.qw-plan.sm { font-size:8px; letter-spacing:.05em; padding:2px 5px; border-radius:4px; }
+.qw-badge { font-family:var(--font-mono); font-size:9.5px; font-weight:700; letter-spacing:.1em;
+  padding:3px 8px; border-radius:6px; border:1px solid transparent; }
+.qw-chip { font-family:var(--font-mono); font-size:9.5px; font-weight:700; letter-spacing:.08em; padding:3px 7px; border-radius:5px; }
+.qw-sevdot { width:7px; height:7px; border-radius:50%; flex:none; }
+/* severity colour application */
+.sev-ok  { --c:var(--ok-text);   --bar:var(--ok-bar);   --bbg:var(--ok-badge-bg);   --bbd:var(--ok-badge-bd); }
+.sev-warn{ --c:var(--warn-text); --bar:var(--warn-bar); --bbg:var(--warn-badge-bg); --bbd:var(--warn-badge-bd); }
+.sev-crit{ --c:var(--crit-text); --bar:var(--crit-bar); --bbg:var(--crit-badge-bg); --bbd:var(--crit-badge-bd); }
+.qw-badge.sev-ok,.qw-badge.sev-warn,.qw-badge.sev-crit { color:var(--c); background:var(--bbg); border-color:var(--bbd); }
+.qw-chip.sev-ok,.qw-chip.sev-warn,.qw-chip.sev-crit     { color:var(--c); background:var(--bbg); }
+.qw-sevdot.sev-ok,.qw-sevdot.sev-warn,.qw-sevdot.sev-crit{ background:var(--c); box-shadow:0 0 6px var(--c); }
+
+/* ---- Usage bars (FOCUS — large) --------------------------------------- */
+.qw-bars { padding:0 16px 6px; display:flex; flex-direction:column; gap:16px; }
+.qw-bar-head { display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:9px; }
+.qw-bar-label { font-family:var(--font-mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--faint); }
+.qw-bar-pct { font-size:26px; font-weight:800; letter-spacing:-.03em; line-height:1.05; margin-top:2px; color:var(--c); }
+.qw-bar-pct small { font-size:15px; font-weight:700; color:var(--dim); }
+.qw-track { position:relative; height:9px; border-radius:6px; background:var(--track); overflow:hidden; }
+.qw-fill  { position:absolute; inset:0 auto 0 0; border-radius:6px; background:var(--bar); transition:width .5s ease; }
+.qw-reset { display:flex; align-items:center; gap:7px; margin-top:10px; background:var(--reset-bg);
+  border-radius:8px; padding:7px 11px; width:fit-content; }
+.qw-reset .lbl { font-size:11px; color:var(--dim); }
+.qw-reset .val { font-family:var(--font-mono); font-size:12.5px; font-weight:700; color:var(--text); letter-spacing:.02em; }
+
+/* ---- Grid cards ------------------------------------------------------- */
+.qw-cards { padding:10px 14px 12px; display:flex; flex-direction:column; gap:9px; max-height:368px; overflow-y:auto; }
+.qw-card { background:var(--card); border:1px solid var(--card-border); border-radius:11px; padding:13px 15px; }
+.qw-card-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.qw-card-id { display:flex; align-items:center; gap:9px; }
+.qw-card-id .nm { font-size:13.5px; font-weight:700; }
+.qw-card-bars { display:flex; flex-wrap:wrap; gap:12px 18px; }
+.qw-cb { flex:1 1 40%; min-width:130px; }
+.qw-cb-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:5px; }
+.qw-cb-label { font-family:var(--font-mono); font-size:9.5px; letter-spacing:.1em; color:var(--dim); }
+.qw-cb-pct { font-family:var(--font-mono); font-size:13px; font-weight:700; color:var(--c); }
+.qw-cb-track { height:7px; border-radius:5px; background:var(--track); overflow:hidden; }
+.qw-cb-fill { height:100%; border-radius:5px; background:var(--bar); transition:width .5s ease; }
+.qw-cb-reset { font-family:var(--font-mono); font-size:10px; color:var(--faint); margin-top:6px; }
+
+/* ---- Grid compact rows ------------------------------------------------ */
+.qw-row { display:flex; align-items:center; gap:11px; background:var(--card); border:1px solid var(--card-border);
+  border-radius:9px; padding:9px 12px; }
+.qw-row .nm { font-size:13px; font-weight:700; flex:none; min-width:72px; }
+.qw-row .mini { flex:1; height:6px; border-radius:5px; background:var(--track); overflow:hidden; min-width:40px; }
+.qw-row .mini > div { height:100%; border-radius:5px; background:var(--bar); transition:width .5s ease; }
+.qw-row .pct { font-family:var(--font-mono); font-size:12px; font-weight:700; color:var(--c); flex:none; min-width:30px; text-align:right; }
+
+/* ---- Footer ----------------------------------------------------------- */
+.qw-footer { display:flex; align-items:center; justify-content:space-between; padding:13px 16px; border-top:1px solid var(--card-border);
+  font-family:var(--font-mono); font-size:10px; color:var(--faint); letter-spacing:.04em; }
+.qw-panel.is-grid .qw-footer { padding:11px 18px; background:var(--header-bg); }
+
+/* ---- Scrollbars ------------------------------------------------------- */
+.qw-menu::-webkit-scrollbar, .qw-cards::-webkit-scrollbar { width:6px; }
+.qw-menu::-webkit-scrollbar-thumb, .qw-cards::-webkit-scrollbar-thumb { background:rgba(128,128,128,.4); border-radius:3px; }
+.qw-menu::-webkit-scrollbar-track, .qw-cards::-webkit-scrollbar-track { background:transparent; }
+</style>
+<!-- ========================= popup.css ENDS =========================== -->
+</head>
+<body>
+
+<!-- ========================= popup.html STARTS ======================== -->
+<!-- The real popup only needs this shell; JS renders the panel into it. -->
+<div class="qw-shell" id="qwShell">
+  <div class="qw-panel" id="qwPanel"><!-- rendered by JS --></div>
+</div>
+<!-- ========================= popup.html ENDS ========================== -->
+
+<!-- ========================= popup.js STARTS ========================== -->
+<script>
+"use strict";
+
+/* ICONS — inline SVG (feather refresh-cw / sun / moon) ------------------ */
+const ICON = {
+  refresh: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
+  sun:  '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 1.6v2.3M12 20.1v2.3M4.3 4.3l1.6 1.6M18.1 18.1l1.6 1.6M1.6 12h2.3M20.1 12h2.3M4.3 19.7l1.6-1.6M18.1 5.9l1.6-1.6"/></svg>',
+  moon: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
+};
+
+/* STATE ---------------------------------------------------------------- */
+const state = {
+  mode: 'focus',      // 'focus' | 'grid'
+  theme: 'dark',      // 'dark'  | 'light'
+  themeRot: 0,        // accumulates +180 each toggle for the spin
+  active: null,       // active provider id (focus)
+  compact: false,     // grid density
+  menuOpen: false,    // focus provider dropdown
+  syncing: false,
+  data: null,         // payload.data (set by init)
+};
+
+const RANK = { crit: 0, warn: 1, ok: 2 };
+const STATUS_TEXT = { ok: 'NOMINAL', warn: 'WARNING', crit: 'CRITICAL' };
+
+/* helpers -------------------------------------------------------------- */
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function fmt(sec) {
+  if (sec == null) return '';
+  if (sec <= 0) return 'now';
+  const d = Math.floor(sec/86400), h = Math.floor((sec%86400)/3600), m = Math.floor((sec%3600)/60), s = sec%60;
+  if (d > 0) return d+'d '+h+'h';
+  if (h > 0) return h+'h '+m+'m';
+  if (m > 0) return m+'m '+s+'s';
+  return s+'s';
+}
+const worstBar = (p) => p.bars.reduce((a,b) => (b.pct > a.pct ? b : a), p.bars[0]);
+
+/* bar/card fragment builders ------------------------------------------- */
+function bigBar(b) {
+  const reset = (b.secs != null)
+    ? `<div class="qw-reset"><span>⏱</span><span class="lbl">resets in</span><span class="val" data-key="${esc(b.key)}">${esc(fmt(b.secs))}</span></div>` : '';
+  return `<div class="sev-${b.sev}">
+    <div class="qw-bar-head">
+      <div><div class="qw-bar-label">${esc(b.label)}</div>
+        <div class="qw-bar-pct">${b.pct}<small>%</small></div></div>
+      <span class="qw-badge sev-${b.sev}">${STATUS_TEXT[b.sev]}</span>
+    </div>
+    <div class="qw-track"><div class="qw-fill" style="width:${b.pct}%"></div></div>
+    ${reset}</div>`;
+}
+function cardBar(b) {
+  const reset = (b.secs != null) ? `<div class="qw-cb-reset">↺ <span data-key="${esc(b.key)}">${esc(fmt(b.secs))}</span></div>` : '';
+  return `<div class="qw-cb sev-${b.sev}">
+    <div class="qw-cb-head"><span class="qw-cb-label">${esc(b.label)}</span><span class="qw-cb-pct">${b.pct}%</span></div>
+    <div class="qw-cb-track"><div class="qw-cb-fill" style="width:${b.pct}%"></div></div>${reset}</div>`;
+}
+
+/* header (shared by both layouts) -------------------------------------- */
+function header(grid) {
+  const count = state.data.providers.length;
+  const meta = grid ? `<span class="qw-count">${count} PROVIDERS</span>` : '';
+  return `<div class="qw-header">
+    <div class="qw-brand"><span class="qw-live"></span><span class="name">QuotaWatch</span>${meta}</div>
+    <div class="qw-actions">
+      <button class="qw-iconbtn qw-refresh${state.syncing?' is-syncing':''}" data-act="sync" title="Refresh"><span class="ico">${ICON.refresh}</span></button>
+      <button class="qw-iconbtn qw-theme is-${state.theme}" data-act="theme" title="Toggle theme"><span class="ico" style="transform:rotate(${state.themeRot}deg)">${state.theme==='dark'?ICON.sun:ICON.moon}</span></button>
+      <span class="qw-close" data-act="close">×</span>
+    </div></div>`;
+}
+
+/* FOCUS layout --------------------------------------------------------- */
+function renderFocus() {
+  const provs = state.data.providers;
+  const active = provs.find(p => p.id === state.active) || provs[0];
+  const seg = `<div class="qw-toggles"><div class="qw-seg">
+      <button class="active" data-act="focus">FOCUS</button>
+      <button data-act="grid">GRID</button></div></div>`;
+
+  const menu = state.menuOpen ? `<div class="qw-menu">${provs.map(p => {
+      const w = worstBar(p);
+      return `<button class="qw-menu-item${p.id===active.id?' active':''}" data-pick="${esc(p.id)}">
+        <span class="qw-dot" style="background:${esc(p.dot)}"></span>
+        <span class="nm">${esc(p.name)}</span>
+        <span class="qw-plan sm">${esc(p.plan)}</span>
+        <span class="pct sev-${w.sev}" style="color:var(--c)">${w.pct}%</span>
+        <span class="qw-sevdot sev-${p.statusSev}"></span></button>`;
+    }).join('')}</div>` : '';
+
+  const switcher = `<div class="qw-switcher-wrap" data-menu>
+      <button class="qw-switcher" data-act="menu">
+        <span class="qw-dot" style="background:${esc(active.dot)}"></span>
+        <span class="nm">${esc(active.name)}</span>
+        <span class="qw-plan">${esc(active.plan)}</span>
+        <span class="count">${provs.length}&nbsp;&#9662;</span>
+      </button>${menu}</div>`;
+
+  const account = `<div class="qw-account"><span class="email">${esc(active.email)}</span>
+      <span class="qw-plan">${esc(active.plan)}</span></div>`;
+
+  const bars = `<div class="qw-bars">${active.bars.map(bigBar).join('')}</div>`;
+  const footer = `<div class="qw-footer"><span>${esc(state.data.status)}</span><span>${esc(state.data.version)}</span></div>`;
+
+  state.active = active.id;
+  return header(false) + seg + switcher + account + bars + footer;
+}
+
+/* GRID layout ---------------------------------------------------------- */
+function renderGrid() {
+  const provs = state.data.providers.slice().sort((a,b) =>
+    (RANK[a.statusSev]-RANK[b.statusSev]) || (worstBar(b).pct - worstBar(a).pct));
+
+  const toggles = `<div class="qw-toggles">
+      <div class="qw-toggle-row">
+        <div class="qw-seg"><button data-act="focus">FOCUS</button><button class="active" data-act="grid">GRID</button></div>
+        <button class="qw-density${state.compact?' active':''}" data-act="density" title="Toggle density">☰</button>
+      </div><div class="qw-sort-note">SORTED BY SEVERITY</div></div>`;
+
+  const cards = provs.map(p => {
+    if (state.compact) {
+      const w = worstBar(p);
+      return `<div class="qw-row sev-${p.statusSev}">
+        <span class="qw-dot" style="background:${esc(p.dot)}"></span>
+        <span class="nm">${esc(p.name)}</span>
+        <span class="qw-plan sm">${esc(p.plan)}</span>
+        <div class="mini sev-${w.sev}"><div style="width:${w.pct}%"></div></div>
+        <span class="pct sev-${w.sev}">${w.pct}%</span>
+        <span class="qw-sevdot sev-${p.statusSev}"></span></div>`;
+    }
+    return `<div class="qw-card">
+      <div class="qw-card-head">
+        <div class="qw-card-id"><span class="qw-dot" style="background:${esc(p.dot)}"></span>
+          <span class="nm">${esc(p.name)}</span><span class="qw-plan">${esc(p.plan)}</span></div>
+        <span class="qw-chip sev-${p.statusSev}">● ${STATUS_TEXT[p.statusSev]}</span></div>
+      <div class="qw-card-bars">${p.bars.map(cardBar).join('')}</div></div>`;
+  }).join('');
+
+  const footer = `<div class="qw-footer"><span>${esc(state.data.status)} · NEXT IN 2M48S</span><span>${esc(state.data.version)}</span></div>`;
+  return header(true) + toggles + `<div class="qw-cards">${cards}</div>` + footer;
+}
+
+/* render + size animation ---------------------------------------------- */
+const shell = document.getElementById('qwShell');
+const panel = document.getElementById('qwPanel');
+
+function render() {
+  document.documentElement.setAttribute('data-theme', state.theme);
+  panel.className = 'qw-panel' + (state.mode === 'grid' ? ' is-grid' : '');
+  panel.innerHTML = state.mode === 'grid' ? renderGrid() : renderFocus();
+  shell.style.width = (state.mode === 'grid' ? 440 : 360) + 'px';
+  measure();
+}
+function measure() {
+  // shell animates to the panel's natural height (clipped by overflow:hidden)
+  shell.style.height = panel.offsetHeight + 'px';
+  /* IN THE REAL APP: also call pywebview.api.report_height(panel.offsetHeight)
+     so monitor/popup.py resizes the native window to match. See README. */
+}
+
+/* one event listener, delegated ---------------------------------------- */
+shell.addEventListener('click', (e) => {
+  const pick = e.target.closest('[data-pick]');
+  if (pick) { state.active = pick.dataset.pick; state.menuOpen = false; return render(); }
+  const act = e.target.closest('[data-act]');
+  if (!act) return;
+  switch (act.dataset.act) {
+    case 'focus':  state.mode = 'focus'; render(); break;
+    case 'grid':   state.mode = 'grid'; state.menuOpen = false; render(); break;
+    case 'menu':   state.menuOpen = !state.menuOpen; render(); break;
+    case 'density':state.compact = !state.compact; render(); break;
+    case 'theme':  state.theme = state.theme === 'dark' ? 'light' : 'dark';
+                   state.themeRot += 180; render(); break;
+    case 'sync':   doSync(); break;
+    case 'close':  /* pywebview.api.close() in the real app */ break;
+  }
+});
+// click-away closes the dropdown
+document.addEventListener('mousedown', (e) => {
+  if (state.menuOpen && !e.target.closest('[data-menu]')) { state.menuOpen = false; render(); }
+});
+
+function doSync() {
+  state.syncing = true; render();
+  // REAL APP: pywebview.api.refresh(); then refreshDone(payload) flips this off.
+  clearTimeout(doSync._t);
+  doSync._t = setTimeout(() => { state.syncing = false; render(); }, 800);
+}
+
+/* live reset countdowns — update text in place (no full re-render) ------ */
+setInterval(() => {
+  const secs = {};
+  state.data.providers.forEach(p => p.bars.forEach(b => { if (b.key != null) { b.secs = Math.max(0, b.secs - 1); secs[b.key] = b.secs; } }));
+  document.querySelectorAll('[data-key]').forEach(el => {
+    const v = secs[el.dataset.key]; if (v != null) el.textContent = fmt(v);
+  });
+}, 1000);
+
+/* ---- entry points the Python side calls (mirror existing popup.js) ---- */
+function init(payload)        { state.data = normalize(payload); render(); }
+function refreshDone(payload) { state.data = normalize(payload); state.syncing = false; render(); }
+
+/* Map the real popup.py payload → the shape this UI expects.
+   ADAPT THIS to monitor/popup.py _build_payload(). Mock below shows the shape. */
+function normalize(payload) {
+  return payload; // mock is already in the right shape
+}
+
+/* ====================================================================== */
+/*  MOCK PAYLOAD — delete in the real app; replace with init(realPayload) */
+/* ====================================================================== */
+const MOCK_PAYLOAD = {
+  version: 'v2.4.0',
+  status: 'UPDATED 12S AGO',
+  providers: [
+    { id:'claude', name:'Claude', plan:'MAX', email:'alex@studio.dev', dot:'#c2683f', statusSev:'crit',
+      bars:[ {label:'SESSION · 5H', pct:72, sev:'warn', key:'c_sess', secs:8040},
+             {label:'WEEKLY · 7D',  pct:91, sev:'crit', key:'c_week', secs:280800} ] },
+    { id:'codex', name:'Codex', plan:'PLUS', email:'alex@studio.dev', dot:'#5b8def', statusSev:'ok',
+      bars:[ {label:'SESSION · 5H', pct:38, sev:'ok', key:'x_sess', secs:11700},
+             {label:'WEEKLY · 7D',  pct:54, sev:'ok', key:'x_week', secs:367200} ] },
+    { id:'windsurf', name:'Windsurf', plan:'PRO', email:'local · no login', dot:'#2bb3a3', statusSev:'warn',
+      bars:[ {label:'DAILY · 1D', pct:83, sev:'warn', key:'w_day', secs:33300},
+             {label:'WEEKLY · 7D', pct:46, sev:'ok', key:'w_week', secs:453600} ] },
+    { id:'antigravity', name:'Antigravity', plan:'AI ULTRA', email:'alex@studio.dev', dot:'#b07ae0', statusSev:'warn',
+      bars:[ {label:'CLAUDE', pct:61, sev:'warn', key:null, secs:null},
+             {label:'GEMINI PRO', pct:29, sev:'ok', key:null, secs:null},
+             {label:'GEMINI FLASH', pct:12, sev:'ok', key:null, secs:null},
+             {label:'GPT-OSS', pct:7, sev:'ok', key:null, secs:null} ] },
+    { id:'grok', name:'Grok', plan:'SUPERGROK', email:'alex@studio.dev', dot:'#7d8694', statusSev:'warn',
+      bars:[ {label:'SESSION · 2H', pct:58, sev:'warn', key:'g_sess', secs:4200},
+             {label:'MONTHLY · 30D', pct:41, sev:'ok', key:'g_month', secs:1555200} ] },
+    { id:'opencode', name:'OpenCode', plan:'BYOK', email:'local · byo key', dot:'#e0863f', statusSev:'ok',
+      bars:[ {label:'SESSION · 5H', pct:22, sev:'ok', key:'o_sess', secs:9900},
+             {label:'WEEKLY · 7D', pct:34, sev:'ok', key:'o_week', secs:388800} ] },
+  ],
+};
+init(MOCK_PAYLOAD);
+</script>
+<!-- ========================= popup.js ENDS ============================ -->
+</body>
+</html>

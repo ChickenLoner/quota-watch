@@ -1,4 +1,4 @@
-"""SOC popup window using pywebview with Edge WebView2."""
+"""Popup window using pywebview with Edge WebView2."""
 from __future__ import annotations
 
 import ctypes
@@ -16,33 +16,24 @@ _WS_EX_TOOLWINDOW   = 0x00000080
 import webview  # type: ignore[import-untyped]
 
 from . import __version__
-from .formatting import elapsed_pct, field_period, midnight_positions, time_until
+from .formatting import elapsed_pct, field_period
 
 if TYPE_CHECKING:
     from .app import App
 
-_HTML_DIR  = Path(__file__).parent / 'html'
-_HTML_FILE = _HTML_DIR / 'popup.html'
-_POPUP_W   = 340
-_BASELINE_DPI = 96
+_HTML_DIR       = Path(__file__).parent / 'html'
+_HTML_FILE      = _HTML_DIR / 'popup.html'
+_POPUP_W_FOCUS  = 360
+_POPUP_W_GRID   = 440
+_BASELINE_DPI   = 96
 
-_TRANSLATIONS = {
-    'title':              'QUOTA WATCH',
-    'account':            'OPERATOR',
-    'email':              'EMAIL',
-    'plan':               'CLEARANCE',
-    'auth_status':        'STATUS',
-    'usage':              'QUOTA CHANNELS',
-    'extra_usage':        'EXTRA USAGE',
-    'claude_code':        'CLAUDE CODE',
-    'changelog':          'CHANGELOG',
-    'status_updated_s':   'UPDATED {s}S AGO',
-    'status_updated':     'UPDATED {duration} AGO',
-    'status_next_update': 'NEXT IN {duration}',
-    'status_refreshing':  'SYNCING...',
-    'duration_hm':        '{h}H {m}M',
-    'duration_m':         '{m}M',
-    'duration_s':         '{s}S',
+_BG_DARK = '#14161c'
+
+_PROVIDER_DOTS = {
+    'claude':      '#c2683f',
+    'codex':       '#5b8def',
+    'windsurf':    '#2bb3a3',
+    'antigravity': '#b07ae0',
 }
 
 CHANGELOG_URL = 'https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md'
@@ -98,111 +89,131 @@ def _tray_position(popup_w: int, popup_h: int) -> tuple[int, int]:
         return 40, 40
 
 
-def _bar_entry(provider_name: str, f: Any) -> dict[str, Any]:
+_RE_AUTH_HINTS: dict[str, str] = {
+    'claude':      'claude auth login',
+    'codex':       'codex login',
+    'antigravity': 'open Antigravity to refresh',
+}
+
+_ORDER = ['claude', 'codex', 'windsurf', 'antigravity']
+
+
+def _bar_entry(f: Any) -> dict[str, Any]:
     pct      = f.utilization
     resets   = f.resets_at or ''
     period   = field_period(f.key)
     time_pct = elapsed_pct(resets, period) if period else None
-    warn     = pct >= 100 or (time_pct is not None and pct > time_pct)
-    marker   = max(0.0, min(1.0, time_pct / 100)) if time_pct is not None else None
+    warn     = time_pct is not None and pct > time_pct
+    sev      = 'crit' if pct >= 90 else ('warn' if warn else 'ok')
     return {
-        'provider':    provider_name,
-        'label':       f.label,
-        'pct_text':    f'{pct:.0f}%',
-        'fill_pct':    max(0.0, min(1.0, pct / 100)),
-        'warn':        warn,
-        'reset_text':  time_until(resets) if resets else '',
-        'resets_at':   resets,
-        'midnights':   midnight_positions(resets, period) if period else [],
-        'marker_rel':  marker,
+        'key':        f.key,
+        'label':      f.label,
+        'pct':        round(pct, 1),
+        'sev':        sev,
+        'resets_at':  resets or None,
     }
+
+
+def _extra_usage(snap_data: Any) -> dict[str, Any] | None:
+    extra_data = snap_data.extras.get('extra_usage') if snap_data else None
+    if not extra_data or not extra_data.get('is_enabled'):
+        return None
+    limit = extra_data.get('monthly_limit', 0) or 0
+    if limit <= 0:
+        return None
+    used = extra_data.get('used_credits', 0) or 0
+    pct  = used / limit * 100
+    return {
+        'pct_text':   f'{pct:.0f}%',
+        'fill_pct':   max(0.0, min(1.0, pct / 100)),
+        'spent_text': f'{used / 100:.2f} / {limit / 100:.2f}',
+    }
+
+
+def _installs() -> list[dict[str, str]]:
+    try:
+        from .claude_cli import find_installations
+        return [{'name': i.name, 'version': i.version} for i in find_installations()]
+    except Exception:
+        return []
+
+
+_SEV_RANK = {'crit': 0, 'err': 1, 'warn': 2, 'ok': 3}
+
+
+def _provider_entry(pid: str, s: Any, claude_profile: dict[str, Any] | None) -> dict[str, Any]:
+    bars = [_bar_entry(f) for f in s.fields] if not s.error else []
+
+    auth_status = 'connected'
+    re_auth_hint = None
+    error_text = None
+    if s.auth_error:
+        auth_status = 'auth_error'
+        re_auth_hint = _RE_AUTH_HINTS.get(pid)
+        error_text = s.error
+    elif s.error:
+        auth_status = 'error'
+        error_text = s.error
+
+    email = None
+    plan = None
+    if pid == 'claude' and claude_profile:
+        email = claude_profile.get('email') or None
+        plan = claude_profile.get('plan') or None
+    elif s.extras:
+        email = s.extras.get('email') or None
+        plan_raw = s.extras.get('plan_type') or s.extras.get('plan_name') or ''
+        plan = plan_raw.replace('_', ' ').title() if plan_raw else None
+
+    if bars:
+        worst = min((b['sev'] for b in bars), key=lambda sev: _SEV_RANK[sev])
+    else:
+        worst = 'err' if auth_status != 'connected' else 'ok'
+
+    entry: dict[str, Any] = {
+        'id':          pid,
+        'name':        s.provider_name,
+        'dot':         _PROVIDER_DOTS.get(pid, '#7d8694'),
+        'plan':        plan,
+        'email':       email,
+        'authStatus':  auth_status,
+        'reAuthHint':  re_auth_hint,
+        'errorText':   error_text,
+        'statusSev':   worst,
+        'bars':        bars,
+        'extra':       None,
+        'installs':    None,
+    }
+    if pid == 'claude':
+        entry['extra'] = _extra_usage(s)
+        entry['installs'] = _installs()
+    return entry
 
 
 def _build_payload(app: App) -> dict[str, Any]:
-    """Build the JSON config+data payload for the popup JS init()."""
+    """Build the JSON payload for the popup JS init()."""
     snap      = app.cache_snapshot()
     snapshots = snap.snapshots  # dict[provider_id, UsageSnapshot]
 
-    # Per-provider profiles (email + plan + auth_status) keyed by provider_name
-    _RE_AUTH_HINTS: dict[str, str] = {
-        'claude':      'claude auth login',
-        'codex':       'codex login',
-        'antigravity': 'open Antigravity to refresh',
-    }
-    provider_profiles: dict[str, Any] = {}
+    claude_profile = None
     if snap.profile:
         account = snap.profile.get('account', {})
         org     = snap.profile.get('organization', {})
         plan    = org.get('organization_type', '').replace('_', ' ').title()
-        provider_profiles['Claude'] = {
-            'email': account.get('email', ''),
-            'plan':  plan or '',
-        }
-    for pid, s in snapshots.items():
-        key   = s.provider_name
-        entry = provider_profiles.setdefault(key, {})
-        if s.auth_error:
-            entry['auth_status'] = 'auth_error'
-            hint = _RE_AUTH_HINTS.get(pid)
-            if hint:
-                entry['re_auth_hint'] = hint
-        elif s.error:
-            entry['auth_status'] = 'error'
-        else:
-            entry['auth_status'] = 'connected'
-            if pid != 'claude':
-                email    = s.extras.get('email', '')
-                plan_raw = s.extras.get('plan_type') or s.extras.get('plan_name') or ''
-                if email:
-                    entry['email'] = email
-                if plan_raw:
-                    entry['plan'] = plan_raw.replace('_', ' ').title()
+        claude_profile = {'email': account.get('email', ''), 'plan': plan or ''}
 
-    # Keep legacy single `profile` key (Claude) for backward compat
-    profile = provider_profiles.get('Claude')
-
-    # Usage bars — one section per provider, ordered: claude, codex, windsurf, others
-    _ORDER = ['claude', 'codex', 'windsurf', 'antigravity']
     ordered_ids = [pid for pid in _ORDER if pid in snapshots] + \
                   [pid for pid in snapshots if pid not in _ORDER]
 
-    usage_bars: list[dict[str, Any]] = []
-    for pid in ordered_ids:
-        snap_data = snapshots[pid]
-        if snap_data.error or not snap_data.fields:
-            continue
-        for f in snap_data.fields:
-            usage_bars.append(_bar_entry(snap_data.provider_name, f))
+    providers = [_provider_entry(pid, snapshots[pid], claude_profile) for pid in ordered_ids]
 
-    # Extra usage (Anthropic/Claude-specific)
-    extra = None
-    claude_snap = snapshots.get('claude')
-    extra_data  = claude_snap.extras.get('extra_usage') if claude_snap else None
-    if extra_data and extra_data.get('is_enabled'):
-        limit = extra_data.get('monthly_limit', 0) or 0
-        if limit > 0:
-            used = extra_data.get('used_credits', 0) or 0
-            pct  = used / limit * 100
-            extra = {
-                'pct_text':   f'{pct:.0f}%',
-                'fill_pct':   max(0.0, min(1.0, pct / 100)),
-                'spent_text': f'{used / 100:.2f} / {limit / 100:.2f}',
-            }
-
-    # Installations
-    try:
-        from .claude_cli import find_installations
-        installs = [{'name': i.name, 'version': i.version} for i in find_installations()]
-    except Exception:
-        installs = []
-
-    # Status
+    # Status (footer)
     has_any_data = any(not s.error and s.fields for s in snapshots.values())
     if not has_any_data:
-        if snap.last_error:
-            status: dict[str, Any] = {'text': snap.last_error[:120], 'is_error': True}
-        else:
-            status = {'text': 'SYNCING...', 'is_error': False}
+        status: dict[str, Any] = {
+            'text':     snap.last_error[:120] if snap.last_error else 'SYNCING...',
+            'is_error': bool(snap.last_error),
+        }
     else:
         status = {
             'last_success_time': snap.last_success_time,
@@ -211,25 +222,10 @@ def _build_payload(app: App) -> dict[str, Any]:
             'error':             snap.last_error[:120] if snap.last_error else None,
         }
 
-    # Provider tab names — all polled providers (errored ones show auth status)
-    provider_names = [
-        snapshots[pid].provider_name
-        for pid in ordered_ids
-        if pid in snapshots
-    ]
-
     return {
-        't':           _TRANSLATIONS,
-        'app_version': f'v{__version__}',
-        'data': {
-            'providers':         provider_names,
-            'provider_profiles': provider_profiles,
-            'profile':           profile,
-            'usage':             usage_bars,
-            'extra':         extra,
-            'installations': installs,
-            'status':        status,
-        },
+        'version':   f'v{__version__}',
+        'status':    status,
+        'providers': providers,
     }
 
 
@@ -257,33 +253,42 @@ class _PopupApi:
         except Exception:
             pass
 
-    def report_height(self, height: int) -> None:
-        """JS ResizeObserver calls this when content height changes."""
-        h = int(height)
-        if h > 0 and h != self._popup._last_height:
-            self._popup._last_height = h
-            x, y = _tray_position(_POPUP_W, h)
+    def report_size(self, width: int, height: int) -> None:
+        """JS calls this after each render with the exact panel dimensions.
+        Always resizes to match — no grow-only tricks needed because JS
+        passes the exact intended size for the current layout mode.
+        """
+        w, h = int(width), int(height)
+        if w > 0 and h > 0 and (w != self._popup._last_w or h != self._popup._last_h):
+            self._popup._last_w = w
+            self._popup._last_h = h
+            x, y = _tray_position(w, h)
             self._popup._win.move(x, y)
-            self._popup._win.resize(_POPUP_W, h)
+            self._popup._win.resize(w, h)
+
+    def report_height(self, height: int) -> None:
+        """Backward-compat shim — delegates to report_size with last known width."""
+        self.report_size(self._popup._last_w, height)
 
 
 class UsagePopup:
-    """Opens the SOC popup and blocks the calling thread until closed."""
+    """Opens the popup window and blocks the calling thread until closed."""
 
     def __init__(self, app: App) -> None:
         self._app          = app
         self._closed       = threading.Event()
-        self._last_height  = 400
+        self._last_w       = _POPUP_W_FOCUS
+        self._last_h       = 20
         self._unique_title = f'__quota_watch_{id(self)}__'
 
         api = _PopupApi(self)
 
         self._win = webview.create_window(
             self._unique_title, url=str(_HTML_FILE),
-            width=_POPUP_W, height=self._last_height,
+            width=self._last_w, height=self._last_h,
             resizable=False, frameless=True, shadow=False,
             easy_drag=False, on_top=True, hidden=True,
-            background_color='#070b14',
+            background_color=_BG_DARK,
             js_api=api,
         )
         self._win.events.loaded += self._on_loaded
@@ -301,10 +306,9 @@ class UsagePopup:
                 (ex | _WS_EX_TOOLWINDOW) & ~_WS_EX_APPWINDOW,
             )
 
-        # Position near tray before showing
-        x, y = _tray_position(_POPUP_W, self._last_height)
+        # Position near tray before showing (JS will call report_size after init)
+        x, y = _tray_position(self._last_w, self._last_h)
         self._win.move(x, y)
-        self._win.resize(_POPUP_W, self._last_height)
 
         # Inject data into page
         payload = _build_payload(self._app)

@@ -2,72 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="popup.css">
 </head>
 <body>
 
-<div class="hexbg"></div>
-
-<header>
-  <div class="header-left">
-    <span class="live-dot"></span>
-    <span id="title"></span>
-  </div>
-  <div class="header-right">
-    <button type="button" id="refreshBtn" aria-label="Refresh">&#x21BB;</button>
-    <button type="button" id="closeBtn" aria-label="Close">&times;</button>
-  </div>
-</header>
-
-<div id="providerTabs"></div>
-
-<section id="accountSection">
-  <h2 class="section-head"><i></i><span id="headingAccount"></span></h2>
-  <dl>
-    <div id="emailRow">
-      <dt id="labelEmail"></dt>
-      <dd id="emailValue"></dd>
-    </div>
-    <div id="planRow">
-      <dt id="labelPlan"></dt>
-      <dd id="planValue" class="plan-badge"></dd>
-    </div>
-    <div id="authStatusRow">
-      <dt id="labelAuthStatus"></dt>
-      <dd id="authStatusValue"></dd>
-    </div>
-  </dl>
-  <p id="authHintRow" class="auth-hint"></p>
-</section>
-
-<section id="usageSection">
-  <h2 class="section-head"><i></i><span id="headingUsage"></span></h2>
-  <div id="usageBars"></div>
-</section>
-
-<section id="extraSection">
-  <h2 class="section-head"><i></i><span id="headingExtraUsage"></span></h2>
-  <div class="bar-header">
-    <span id="extraSpent"></span>
-    <span id="extraPct" class="bar-pct"></span>
-  </div>
-  <div class="bar-container">
-    <div class="bar-fill ok" id="extraFill" style="width:0%"></div>
-  </div>
-</section>
-
-<section id="installSection">
-  <div class="heading-row">
-    <h2 class="section-head"><i></i><span id="headingClaudeCode"></span></h2>
-    <span id="changelogLink" class="link"></span>
-  </div>
-  <dl id="installRows"></dl>
-</section>
-
-<footer id="statusSection">
-  <span id="statusText"></span>
-  <span id="appVersion" class="mono-dim"></span>
-</footer>
+<div class="qw-shell" id="qwShell">
+  <div class="qw-panel" id="qwPanel"><!-- rendered by JS --></div>
+</div>
 
 <script src="popup.js"></script>
 </body>
