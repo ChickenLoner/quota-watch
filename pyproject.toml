@@ -1,6 +1,6 @@
 [project]
 name = "quota-watch"
-version = "0.3.1"
+version = "0.3.2"
 description = "Multi-provider AI quota monitor (Claude, OpenAI Codex, Windsurf, Google Antigravity)"
 requires-python = ">=3.11"
 dependencies = [
