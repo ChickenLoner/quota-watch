@@ -31,6 +31,7 @@ _TRANSLATIONS = {
     'account':            'OPERATOR',
     'email':              'EMAIL',
     'plan':               'CLEARANCE',
+    'auth_status':        'STATUS',
     'usage':              'QUOTA CHANNELS',
     'extra_usage':        'EXTRA USAGE',
     'claude_code':        'CLAUDE CODE',
@@ -122,7 +123,12 @@ def _build_payload(app: App) -> dict[str, Any]:
     snap      = app.cache_snapshot()
     snapshots = snap.snapshots  # dict[provider_id, UsageSnapshot]
 
-    # Per-provider profiles (email + plan) keyed by provider_name
+    # Per-provider profiles (email + plan + auth_status) keyed by provider_name
+    _RE_AUTH_HINTS: dict[str, str] = {
+        'claude':      'claude auth login',
+        'codex':       'codex login',
+        'antigravity': 'open Antigravity to refresh',
+    }
     provider_profiles: dict[str, Any] = {}
     if snap.profile:
         account = snap.profile.get('account', {})
@@ -133,19 +139,30 @@ def _build_payload(app: App) -> dict[str, Any]:
             'plan':  plan or '',
         }
     for pid, s in snapshots.items():
-        if pid == 'claude' or s.error:
-            continue
-        email     = s.extras.get('email', '')
-        plan_raw  = s.extras.get('plan_type') or s.extras.get('plan_name') or ''
-        plan_disp = plan_raw.replace('_', ' ').title()
-        if email or plan_disp:
-            provider_profiles[s.provider_name] = {'email': email, 'plan': plan_disp}
+        key   = s.provider_name
+        entry = provider_profiles.setdefault(key, {})
+        if s.auth_error:
+            entry['auth_status'] = 'auth_error'
+            hint = _RE_AUTH_HINTS.get(pid)
+            if hint:
+                entry['re_auth_hint'] = hint
+        elif s.error:
+            entry['auth_status'] = 'error'
+        else:
+            entry['auth_status'] = 'connected'
+            if pid != 'claude':
+                email    = s.extras.get('email', '')
+                plan_raw = s.extras.get('plan_type') or s.extras.get('plan_name') or ''
+                if email:
+                    entry['email'] = email
+                if plan_raw:
+                    entry['plan'] = plan_raw.replace('_', ' ').title()
 
     # Keep legacy single `profile` key (Claude) for backward compat
     profile = provider_profiles.get('Claude')
 
     # Usage bars — one section per provider, ordered: claude, codex, windsurf, others
-    _ORDER = ['claude', 'codex', 'windsurf']
+    _ORDER = ['claude', 'codex', 'windsurf', 'antigravity']
     ordered_ids = [pid for pid in _ORDER if pid in snapshots] + \
                   [pid for pid in snapshots if pid not in _ORDER]
 
@@ -194,11 +211,11 @@ def _build_payload(app: App) -> dict[str, Any]:
             'error':             snap.last_error[:120] if snap.last_error else None,
         }
 
-    # Provider tab names (only providers with actual data, in display order)
+    # Provider tab names — all polled providers (errored ones show auth status)
     provider_names = [
         snapshots[pid].provider_name
         for pid in ordered_ids
-        if pid in snapshots and not snapshots[pid].error and snapshots[pid].fields
+        if pid in snapshots
     ]
 
     return {

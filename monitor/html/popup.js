@@ -23,6 +23,7 @@ function init(config) {
     document.getElementById('headingUsage').textContent    = t.usage;
     document.getElementById('headingExtraUsage').textContent = t.extra_usage;
     document.getElementById('headingClaudeCode').textContent = t.claude_code;
+    document.getElementById('labelAuthStatus').textContent  = t.auth_status || 'STATUS';
     document.getElementById('appVersion').textContent      = config.app_version;
 
     const link = document.getElementById('changelogLink');
@@ -49,6 +50,9 @@ function init(config) {
         emailValue:      document.getElementById('emailValue'),
         planRow:         document.getElementById('planRow'),
         planValue:       document.getElementById('planValue'),
+        authStatusRow:   document.getElementById('authStatusRow'),
+        authStatusValue: document.getElementById('authStatusValue'),
+        authHintRow:     document.getElementById('authHintRow'),
         usageSection:    document.getElementById('usageSection'),
         usageBars:       document.getElementById('usageBars'),
         extraSection:    document.getElementById('extraSection'),
@@ -90,16 +94,37 @@ function _renderForActiveProvider(data) {
     const onClaude = !activeProvider || activeProvider === 'Claude';
 
     // Account section — per-provider profile
-    const profiles = data.provider_profiles || {};
+    const profiles  = data.provider_profiles || {};
     const profileKey = activeProvider || 'Claude';
     const prof = profiles[profileKey] || (onClaude ? data.profile : null);
-    const hasProfile = !!(prof && (prof.email || prof.plan));
-    els.accountSection.classList.toggle('visible', hasProfile);
-    if (hasProfile) {
+
+    const authStatus = prof ? (prof.auth_status || null) : null;
+    const authError  = authStatus === 'auth_error';
+    const hasAccount = !!(prof && (prof.email || prof.plan || authError));
+    els.accountSection.classList.toggle('visible', hasAccount);
+    if (hasAccount) {
         els.emailValue.textContent = prof.email || '';
         els.emailRow.style.display = prof.email ? '' : 'none';
         els.planValue.textContent  = prof.plan  || '';
         els.planRow.style.display  = prof.plan  ? '' : 'none';
+
+        // Auth status row — only shown when not connected
+        if (authError) {
+            els.authStatusRow.style.display  = '';
+            els.authStatusValue.textContent  = 'AUTH EXPIRED';
+            els.authStatusValue.className    = 'status-warn';
+            const hint = prof.re_auth_hint || null;
+            els.authHintRow.style.display    = hint ? '' : 'none';
+            els.authHintRow.textContent      = hint ? `run:  ${hint}` : '';
+        } else if (authStatus === 'error') {
+            els.authStatusRow.style.display  = '';
+            els.authStatusValue.textContent  = 'ERROR';
+            els.authStatusValue.className    = 'status-err';
+            els.authHintRow.style.display    = 'none';
+        } else {
+            els.authStatusRow.style.display  = 'none';
+            els.authHintRow.style.display    = 'none';
+        }
     }
 
     // Usage bars — filtered to active provider

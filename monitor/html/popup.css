@@ -233,6 +233,30 @@ dl > div > dd {
   letter-spacing: .06em;
 }
 
+.status-warn {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--am) !important;
+  letter-spacing: .06em;
+}
+.status-err {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--rd) !important;
+  letter-spacing: .06em;
+}
+
+.auth-hint {
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-3);
+  letter-spacing: .06em;
+  background: rgba(255,181,71,.06);
+  border-left: 2px solid var(--am);
+  padding: 4px 8px;
+}
+
 /* ── Usage bars ─────────────────────────────────────── */
 #usageBars {
   display: flex;

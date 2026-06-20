@@ -8,12 +8,14 @@ import threading
 import time
 import traceback
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 import pystray  # type: ignore[import-untyped]
 
 from .providers.base import UsageSnapshot
+from .providers.antigravity import AntigravityProvider
 from .providers.claude import ClaudeProvider, read_token
 from .providers.codex import CodexProvider
 from .providers.windsurf import WindsurfProvider
@@ -21,9 +23,9 @@ from .autostart import is_enabled as autostart_is_enabled, set_enabled as autost
 from .formatting import countdown_short, elapsed_pct, field_period
 from .tray import create_icon, create_status_icon, taskbar_is_light, watch_theme
 
-POLL_INTERVAL = 180
-POLL_FAST     = 30
-POLL_ERROR    = 30
+POLL_INTERVAL      = 180
+POLL_FAST          = 30
+_POLL_ERROR_STEPS  = [30, 60, 120, 240, 600]  # backoff ramp on repeated errors
 
 _STATUS_CACHE = Path.home() / '.claude' / 'cache' / 'soc-monitor-status.json'
 
@@ -31,6 +33,20 @@ _THRESHOLDS: dict[str, list[float]] = {
     'five_hour': [50, 80, 95],
     'seven_day': [95],
 }
+
+
+def _at_limit_skip(snap: 'UsageSnapshot') -> bool:
+    """True when primary field is at 100% and reset hasn't passed yet (+5 min grace)."""
+    if not snap.fields:
+        return False
+    f = snap.fields[0]
+    if f.utilization < 100 or not f.resets_at:
+        return False
+    try:
+        reset = datetime.fromisoformat(f.resets_at.replace('Z', '+00:00'))
+        return datetime.now(timezone.utc) < reset + timedelta(minutes=5)
+    except Exception:
+        return False
 
 
 def _thresholds_for(key: str) -> list[float]:
@@ -57,7 +73,7 @@ class App:
 
     def __init__(self) -> None:
         self._claude              = ClaudeProvider()
-        self._providers           = [self._claude, CodexProvider(), WindsurfProvider()]
+        self._providers           = [self._claude, CodexProvider(), WindsurfProvider(), AntigravityProvider()]
         self._snapshots:          dict[str, UsageSnapshot] = {}
         self._profile:            dict[str, Any] | None = None
         self._last_success_time:  float | None = None
@@ -76,6 +92,7 @@ class App:
         self._first_update_done    = False
 
         self._fast_polls       = 0
+        self._error_count      = 0
         self._running          = True
         self.restart_requested = False
 
@@ -145,9 +162,13 @@ class App:
     def _poll_loop(self) -> None:
         while self._running:
             self._update()
-            interval = POLL_FAST if self._fast_polls > 0 else POLL_INTERVAL
             if self._last_error:
-                interval = POLL_ERROR
+                step = min(self._error_count - 1, len(_POLL_ERROR_STEPS) - 1)
+                interval = _POLL_ERROR_STEPS[max(0, step)]
+            elif self._fast_polls > 0:
+                interval = POLL_FAST
+            else:
+                interval = POLL_INTERVAL
 
             deadline = time.time() + interval
             self.next_poll_time = deadline
@@ -159,27 +180,35 @@ class App:
             return
         try:
             new_snapshots: dict[str, UsageSnapshot] = {}
+            skipped: dict[str, UsageSnapshot] = {}  # at-limit providers; use cached data
             for provider in self._providers:
-                if provider.is_available():
+                if not provider.is_available():
+                    continue
+                existing = self._snapshots.get(provider.provider_id)
+                if existing and not existing.error and _at_limit_skip(existing):
+                    skipped[provider.provider_id] = existing
+                else:
                     new_snapshots[provider.provider_id] = provider.fetch()
         finally:
             self._lock.release()
 
-        # Separate successes from failures
+        # Separate successes from failures; merge skipped into ok
         ok      = {pid: s for pid, s in new_snapshots.items() if not s.error}
+        ok.update(skipped)
         failed  = {pid: s for pid, s in new_snapshots.items() if s.error}
 
         if not ok and failed:
             errors = ', '.join(f'{pid}: {s.error}' for pid, s in failed.items())
-            self._last_error = errors
+            self._last_error  = errors
+            self._error_count += 1
             self._render_tray(error=True)
             return
 
         with self._lock:
             self._snapshots.update(new_snapshots)
             self._last_success_time = time.time()
-            # Clear overall error if at least one provider succeeded
-            self._last_error = None
+            self._last_error  = None
+            self._error_count = 0
 
         # Build composite pct_map: "{provider_id}:{field_key}" -> utilization
         pct_map: dict[str, float] = {}
