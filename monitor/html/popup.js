@@ -292,6 +292,9 @@ function _setBarWidth(div, fillPct) {
 function _updateBar(div, entry) {
     const [cls, sevCls, sevLabel] = _barMeta(entry.fill_pct, entry.warn);
 
+    const label = div.querySelector('.bar-label');
+    if (label) label.textContent = entry.label;
+
     const pct = div.querySelector('.bar-pct');
     if (pct) { pct.textContent = entry.pct_text; pct.className = `bar-pct ${cls}`; }
 
