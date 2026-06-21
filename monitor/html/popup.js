@@ -185,11 +185,11 @@ function _header(grid) {
   return `<div class="qw-header">
     <div class="qw-brand"><span class="qw-live"></span><span class="name">QuotaWatch</span>${meta}</div>
     <div class="qw-actions">
-      <button class="qw-iconbtn qw-refresh${state.syncing ? ' is-syncing' : ''}" data-act="sync" title="Refresh">
+      <button class="qw-iconbtn qw-refresh${state.syncing ? ' is-syncing' : ''}" data-act="sync" title="Refresh (R)">
         <span class="ico">${ICON.refresh}</span></button>
-      <button class="qw-iconbtn qw-theme is-${state.theme}" data-act="theme" title="Toggle theme">
+      <button class="qw-iconbtn qw-theme is-${state.theme}" data-act="theme" title="Toggle theme (T)">
         <span class="ico" style="transform:rotate(${state.themeRot}deg)">${icon}</span></button>
-      <span class="qw-close" data-act="close">&times;</span>
+      <span class="qw-close" data-act="close" title="Close (Esc)">&times;</span>
     </div>
   </div>`;
 }
@@ -202,8 +202,8 @@ function _renderFocus() {
   state.active = active.id;
 
   const seg = `<div class="qw-toggles"><div class="qw-seg">
-    <button class="active" data-act="focus">FOCUS</button>
-    <button data-act="grid">GRID</button>
+    <button class="active" data-act="focus" title="Focus mode (←)">FOCUS</button>
+    <button data-act="grid" title="Grid mode (→)">GRID</button>
   </div></div>`;
 
   const menu = state.menuOpen ? `<div class="qw-menu">${provs.map(p => {
@@ -230,7 +230,7 @@ function _renderFocus() {
   }).join('')}</div>` : '';
 
   const switcher = `<div class="qw-switcher-wrap" data-menu>
-    <button class="qw-switcher" data-act="menu">
+    <button class="qw-switcher" data-act="menu" title="Switch provider (↑↓)">
       <span class="qw-dot" style="background:${esc(active.dot)}"></span>
       <span class="nm">${esc(active.name)}</span>
       ${_planBadge(active.plan, false)}
@@ -275,10 +275,10 @@ function _renderGrid() {
   const toggles = `<div class="qw-toggles">
     <div class="qw-toggle-row">
       <div class="qw-seg">
-        <button data-act="focus">FOCUS</button>
-        <button class="active" data-act="grid">GRID</button>
+        <button data-act="focus" title="Focus mode (←)">FOCUS</button>
+        <button class="active" data-act="grid" title="Grid mode (→)">GRID</button>
       </div>
-      <button class="qw-density${state.compact ? ' active' : ''}" data-act="density" title="Toggle density">&#9776;</button>
+      <button class="qw-density${state.compact ? ' active' : ''}" data-act="density" title="Toggle compact (C)">&#9776;</button>
     </div>
     <div class="qw-sort-note">SORTED BY SEVERITY</div>
   </div>`;
@@ -434,6 +434,16 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (state.menuOpen) { state.menuOpen = false; render(); }
     else if (typeof pywebview !== 'undefined') pywebview.api.close();
+    e.preventDefault();
+    return;
+  }
+  if (e.key === 'r' || e.key === 'R') { _doSync(); e.preventDefault(); return; }
+  if (e.key === 'c' || e.key === 'C') { state.compact = !state.compact; _saveState(); _animatedRender(); e.preventDefault(); return; }
+  if (e.key === 't' || e.key === 'T') {
+    state.theme = state.theme === 'dark' ? 'light' : 'dark';
+    state.themeRot += 180;
+    _saveState();
+    render();
     e.preventDefault();
     return;
   }
