@@ -431,7 +431,16 @@ document.addEventListener('mousedown', (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (!state.data) return;
-  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    const next = e.key === 'ArrowRight' ? 'grid' : 'focus';
+    if (state.mode !== next) {
+      state.mode = next;
+      state.menuOpen = false;
+      _saveState();
+      _animatedRender();
+      e.preventDefault();
+    }
+  } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     if (state.mode === 'focus') {
       const provs = _sortedProviders();
       const idx = provs.findIndex(p => p.id === state.active);
