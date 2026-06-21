@@ -15,11 +15,16 @@ Inspired by [CodexBar](https://github.com/steipete/CodexBar) and [usage-monitor-
 - **Live tray icon** — dual progress bars (top usage + second field) color-coded green → amber → red
 - **Session countdown** — reset timer (e.g. `4h22`) drawn on tray icon in cyan
 - **Severity badges** — NOMINAL / WARNING / CRITICAL / BREACH on each bar
+- **Provider logos** — real Claude / Codex / Antigravity icons in tabs and dropdown, not plain dots
+- **Grid sorted by health** — healthiest provider listed first, so you know where to switch
 - **Smart alerts** — tray notifications at 50%, 80%, 95% session; 95% weekly; time-aware (skips if usage is proportionally on-track)
 - **Reset detection** — notifies when quota resets after near-exhaustion
 - **Adaptive polling** — 3-min normally, 30s when session usage is rising
 - **Extra usage** — Claude credit balance if enabled
-- **Claude Code versions** — discovers CLI + IDE extensions (VS Code, Cursor, Windsurf)
+- **CLI version discovery** — Claude Code (CLI + IDE extensions), Codex CLI, Antigravity CLI
+- **Changelog links** — jump straight to release notes for the active provider's CLI
+- **Global hotkey** — `Ctrl+Shift+Q` opens the popup from anywhere
+- **Full keyboard navigation** — `←`/`→` Focus ↔ Grid, `↑`/`↓` switch provider (Focus) or scroll (Grid), `R` refresh, `T` theme, `C` compact density, `Esc` close — hover any button for the shortcut hint
 - **Start with Windows** — registry autostart (frozen EXE only)
 - **No console window** — silent background tray process
 
