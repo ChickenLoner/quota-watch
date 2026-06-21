@@ -7,6 +7,19 @@ const ICON = {
   moon: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
 };
 
+/* PROVIDER LOGOS — base64 PNG 32×32 ------------------------------------ */
+const LOGOS = {
+  claude:      'data:image/png;base64,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',
+  antigravity:      'data:image/png;base64,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',
+  codex:      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAEqElEQVR4nJ2Xa4iVZRDHf+ec3cytiN0P3TDSoIjMQmyLrnTBYutDtkQglXZhJQoW6kv6pVIsi1q7EnQPCiPLQugelbWQrSWmIkoXrLTsbq7r2kV3Yw7/iX8v79kjDbznfc88zzPzn3lm5pkHmlNN7yOBhcBqYAgYAX4C3gCutHmtQIs91X3Q0ZBS6HXAd8CoPSOF/x8BJzWQU20EpNJE+V5gPnCreKuAZ4BPgZ3A4UAXcDlwFLADmAu0yfqvgU+AzQWZTalV70vNwoVjuPNiYLDgkXx2Ay8AJxiIhlQR8vz+SkLuFy8AjDMhhwJ9wO+2LSvlpaeBfgMSHps5FoiqfR8N3KGF4b7xWtRic3vk4lTwInByidypwKsGsKsMRE3vCcBTwLAtCAt9W84vWBZxcVGJYvdU0OOavxXokIcrbnknsMUE79B7tibGvHtt/HugV4qczgKOLwCpCswarZ2nsRYkfKJyOgY3ysrX9H+GCfpRQfUgcERB8RTgTa3ZBdwJtGtsP4GYLa+u1v9KLn5ZC9crsFCBcQCB9jfg0YLimP+w5v4CvGNe+hK42uYeA+zRFh+SzGnA32JmIQl3vV4CIFLtPrPqRhWoP1QvYm+DLpMxCeQ94DRZ/Kt4Eeh1ukuMyFVsT4sAWpVK90jYRlPwTUkGHKC9ToVRgJ6XjD0K+Dq9pQk9QtgIQKTit8B28T8HpgMXABvEWwYcy39pkjLLi9M6jVXi52Mxu821DqC7ACCy4yarCei7V8E3pO0IDzidA3wmmVsUxJUYeFvMOSUeCFddKP54uW+xxjO18gm6zQ6pbVb5kjqUATH+UgpZq8HpGkgakeCpVtMzdVLpXj0Jpk2BGjVlE7BEBk6RZyOLrlLAxzlzaig6RUJCwWTbhhOB96V8heZt17lQs8qIvmsK6BCeNNeywLd3ifiLqiqlUQf2B55V8fhLgXIuMEuVbQA4WArS8vTEiP5nkLXJU2vEd7AVAzQtGRNUo0e16IzC3h2k43hYnrrZrEEgeuWhrRaA3ZL5gXkq6BLxBxIAUuxdzmNqMpyOA17R+CadbOfpOythADhQ82eI/6FtQUXVcVSlu06HAX8qjZYZiJ+BW0pSqrNwFG9QQC2Ql8aNASDouYwBrFjkCRiTzlTgpYL1arsylW5X+Q1rr7easEhGlAGomhd3KcU7MaGDYsaBkVtzjQ6UBPKuvBLfD/mBInpAcooA+i2WVloDU6dsDFYpBmYJbQZMuwJwSAszr52yNRtW7Y8scAArtEUD+v+DAr+KuW+eBtdaP+/NRrju7ILimHdDoZFZbAXrCvGyZxxV7NTTLwGkBzosFZ8spFix60ElOt2Zbo5GBvNen2VWlPFHFPD/Kk/KWt5lAperDBcpeEsLFvWYwBYDvVlz5utmlVTa3tf0nmn9YFr2hLzSr0BNt/ZZB5VKU/jdmveF6WhpchkiQUxWg7K7wWVjUJeRMqroVMy53eK1NppcJL8+TVKuTpTlO2VZu1y/VNVsm86SCK5rgdO1foHA7POVDFHDy6SuWHERLfNMPhHMcaFNg/43BQi/aqcb4zvqRXTO0aqHdyJuIs/jIpv9XlPl/wDuH4YGeE/UMQAAAABJRU5ErkJggg==',
+};
+
+function _dot(pid, dotColor) {
+  const src = LOGOS[pid];
+  if (src) return `<img class="qw-prov-logo" src="${src}" alt="">`;
+  return `<span class="qw-dot" style="background:${esc(dotColor)}"></span>`;
+}
+
 /* STATE ----------------------------------------------------------------- */
 const _STORAGE_KEY = 'qw_ui_state';
 
@@ -92,6 +105,18 @@ function _sortedProviders() {
     if (ra !== rb) return ra - rb;
     const wa = _worstBar(a), wb = _worstBar(b);
     return (wb ? wb.pct : 0) - (wa ? wa.pct : 0);
+  });
+}
+
+/* Grid order: healthiest providers first, so the user sees at a glance
+   which one is safe to switch to; worst-off providers sink to the bottom. */
+const _HEALTH_RANK = { ok: 0, warn: 1, err: 2, crit: 3 };
+function _healthSortedProviders() {
+  return state.data.providers.slice().sort((a, b) => {
+    const ra = _HEALTH_RANK[a.statusSev], rb = _HEALTH_RANK[b.statusSev];
+    if (ra !== rb) return ra - rb;
+    const wa = _worstBar(a), wb = _worstBar(b);
+    return (wa ? wa.pct : 0) - (wb ? wb.pct : 0);
   });
 }
 
@@ -221,7 +246,7 @@ function _renderFocus() {
         </div>`).join('')}</div>`;
     }
     return `<button class="qw-menu-item${p.id === active.id ? ' active' : ''}" data-pick="${esc(p.id)}">
-      <span class="qw-dot" style="background:${esc(p.dot)}"></span>
+      ${_dot(p.id, p.dot)}
       <span class="nm">${esc(p.name)}</span>
       ${_planBadge(p.plan, true)}
       ${pctHtml}
@@ -231,7 +256,7 @@ function _renderFocus() {
 
   const switcher = `<div class="qw-switcher-wrap" data-menu>
     <button class="qw-switcher" data-act="menu" title="Switch provider (↑↓)">
-      <span class="qw-dot" style="background:${esc(active.dot)}"></span>
+      ${_dot(active.id, active.dot)}
       <span class="nm">${esc(active.name)}</span>
       ${_planBadge(active.plan, false)}
       <span class="count">${provs.length}&nbsp;&#9662;</span>
@@ -270,7 +295,7 @@ function _renderFocus() {
 
 /* GRID layout ----------------------------------------------------------- */
 function _renderGrid() {
-  const provs = _sortedProviders();
+  const provs = _healthSortedProviders();
 
   const toggles = `<div class="qw-toggles">
     <div class="qw-toggle-row">
@@ -280,7 +305,7 @@ function _renderGrid() {
       </div>
       <button class="qw-density${state.compact ? ' active' : ''}" data-act="density" title="Toggle compact (C)">&#9776;</button>
     </div>
-    <div class="qw-sort-note">SORTED BY SEVERITY</div>
+    <div class="qw-sort-note">SORTED BY HEALTH</div>
   </div>`;
 
   const cards = provs.map((p, i) => {
@@ -303,7 +328,7 @@ function _renderGrid() {
           </div>`).join('')}</div>`;
       }
       return `<div class="qw-row sev-${sev}" style="--i:${i}">
-        <span class="qw-dot" style="background:${esc(p.dot)}"></span>
+        ${_dot(p.id, p.dot)}
         <span class="nm">${esc(p.name)}</span>
         ${_planBadge(p.plan, true)}
         ${miniHtml}
@@ -330,7 +355,7 @@ function _renderGrid() {
     return `<div class="qw-card" style="--i:${i}">
       <div class="qw-card-head">
         <div class="qw-card-id">
-          <span class="qw-dot" style="background:${esc(p.dot)}"></span>
+          ${_dot(p.id, p.dot)}
           <span class="nm">${esc(p.name)}</span>
           ${_planBadge(p.plan, false)}
         </div>
@@ -410,7 +435,7 @@ function _animatedRender() {
 /* event delegation ------------------------------------------------------ */
 shell.addEventListener('click', (e) => {
   const pick = e.target.closest('[data-pick]');
-  if (pick) { state.active = pick.dataset.pick; state.menuOpen = false; render(); return; }
+  if (pick) { state.active = pick.dataset.pick; state.menuOpen = false; _animatedRender(); return; }
   const act = e.target.closest('[data-act]');
   if (!act) return;
   switch (act.dataset.act) {
@@ -466,7 +491,7 @@ document.addEventListener('keydown', (e) => {
           : (idx - 1 + provs.length) % provs.length;
         state.active = provs[next].id;
         state.menuOpen = false;
-        render();
+        _animatedRender();
         e.preventDefault();
       }
     } else if (state.mode === 'grid') {

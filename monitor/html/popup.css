@@ -202,6 +202,7 @@ html, body {
 
 /* ---- Badges / chips / dots -------------------------------------------- */
 .qw-dot { width:9px; height:9px; border-radius:3px; flex:none; }
+.qw-prov-logo { width:16px; height:16px; border-radius:3px; flex:none; object-fit:contain; display:block; }
 .qw-plan { font-family:var(--font-mono); font-size:9px; font-weight:600; letter-spacing:.06em;
   color:var(--plan-color); background:var(--plan-bg); padding:3px 8px; border-radius:5px; }
 .qw-plan.sm { font-size:8px; letter-spacing:.05em; padding:2px 5px; border-radius:4px; }
