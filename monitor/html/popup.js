@@ -431,6 +431,12 @@ document.addEventListener('mousedown', (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (!state.data) return;
+  if (e.key === 'Escape') {
+    if (state.menuOpen) { state.menuOpen = false; render(); }
+    else if (typeof pywebview !== 'undefined') pywebview.api.close();
+    e.preventDefault();
+    return;
+  }
   if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
     const next = e.key === 'ArrowRight' ? 'grid' : 'focus';
     if (state.mode !== next) {

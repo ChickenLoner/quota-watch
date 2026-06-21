@@ -1,6 +1,8 @@
 """Main application - pystray tray icon, adaptive polling, alerts, autostart, restart."""
 from __future__ import annotations
 
+import ctypes
+import ctypes.wintypes
 import json
 import subprocess
 import sys
@@ -11,6 +13,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+_MOD_CONTROL = 0x0002
+_MOD_SHIFT   = 0x0004
+_WM_HOTKEY   = 0x0312
+_HOTKEY_ID   = 1
 
 import pystray  # type: ignore[import-untyped]
 
@@ -141,6 +148,7 @@ class App:
         if not self._claude.is_available():
             icon.notify('Claude: no token - run: claude auth login', 'QuotaWatch')
         watch_theme(self._on_theme_changed)
+        threading.Thread(target=self._hotkey_loop, daemon=True).start()
         self._ensure_profile()
         self._poll_loop()
 
@@ -155,6 +163,7 @@ class App:
 
     def _on_quit(self, icon: Any = None, item: Any = None) -> None:
         self._running = False
+        ctypes.windll.user32.UnregisterHotKey(None, _HOTKEY_ID)
         self.icon.stop()
 
     # ── Polling ──────────────────────────────────────────────────────────────
@@ -369,6 +378,20 @@ class App:
         if light != self._light_taskbar:
             self._light_taskbar = light
             self._render_tray(error=bool(self._last_error))
+
+    # ── Global hotkey (Ctrl+Shift+Q) ─────────────────────────────────────────
+
+    def _hotkey_loop(self) -> None:
+        user32 = ctypes.windll.user32
+        if not user32.RegisterHotKey(None, _HOTKEY_ID, _MOD_CONTROL | _MOD_SHIFT, ord('Q')):
+            return
+        msg = ctypes.wintypes.MSG()
+        while self._running:
+            r = user32.PeekMessageW(ctypes.byref(msg), None, _WM_HOTKEY, _WM_HOTKEY, 1)
+            if r and msg.message == _WM_HOTKEY and msg.wParam == _HOTKEY_ID:
+                self._on_show()
+            time.sleep(0.05)
+        user32.UnregisterHotKey(None, _HOTKEY_ID)
 
     # ── Popup ─────────────────────────────────────────────────────────────────
 
