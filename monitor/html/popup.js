@@ -217,7 +217,7 @@ function _renderFocus() {
       pctHtml = `<div class="qw-menu-multi">${p.bars.map(b =>
         `<div class="qw-menu-multi-row sev-${b.sev}">
           <span class="lbl">${esc(b.label)}</span>
-          <span class="pct">${Math.round(b.pct)}%</span>
+          <span class="pct" style="color:var(--c)">${Math.round(b.pct)}%</span>
         </div>`).join('')}</div>`;
     }
     return `<button class="qw-menu-item${p.id === active.id ? ' active' : ''}" data-pick="${esc(p.id)}">
