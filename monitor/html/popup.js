@@ -429,6 +429,31 @@ document.addEventListener('mousedown', (e) => {
   if (state.menuOpen && !e.target.closest('[data-menu]')) { state.menuOpen = false; render(); }
 });
 
+document.addEventListener('keydown', (e) => {
+  if (!state.data) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (state.mode === 'focus') {
+      const provs = _sortedProviders();
+      const idx = provs.findIndex(p => p.id === state.active);
+      if (idx !== -1) {
+        const next = e.key === 'ArrowDown'
+          ? (idx + 1) % provs.length
+          : (idx - 1 + provs.length) % provs.length;
+        state.active = provs[next].id;
+        state.menuOpen = false;
+        render();
+        e.preventDefault();
+      }
+    } else if (state.mode === 'grid') {
+      const cards = document.querySelector('.qw-cards');
+      if (cards) {
+        cards.scrollBy({ top: e.key === 'ArrowDown' ? 80 : -80, behavior: 'smooth' });
+        e.preventDefault();
+      }
+    }
+  }
+});
+
 function _doSync() {
   state.syncing = true;
   render();
