@@ -4,6 +4,10 @@ from __future__ import annotations
 import ctypes
 import ctypes.wintypes
 import json
+import os
+import re
+import shutil
+import subprocess
 import threading
 import webbrowser
 from pathlib import Path
@@ -147,6 +151,39 @@ def _installs() -> list[dict[str, str]]:
         return []
 
 
+def _run_version(path: str) -> str:
+    try:
+        proc = subprocess.run(
+            [path, '--version'], capture_output=True, text=True, timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        out = (proc.stdout or proc.stderr or '').strip()
+        m = re.search(r'(\d+\.\d+[\.\d]*)', out)
+        return m.group(1) if m else ''
+    except Exception:
+        return ''
+
+
+def _codex_installs() -> list[dict[str, str]]:
+    path = shutil.which('codex')
+    if not path:
+        return []
+    v = _run_version(path)
+    return [{'name': 'CLI', 'version': v}] if v else []
+
+
+def _agy_installs() -> list[dict[str, str]]:
+    path = shutil.which('agy')
+    if not path:
+        local = Path(os.environ.get('LOCALAPPDATA', '')) / 'agy' / 'bin' / 'agy.exe'
+        if local.is_file():
+            path = str(local)
+    if not path:
+        return []
+    v = _run_version(path)
+    return [{'name': 'CLI', 'version': v}] if v else []
+
+
 _SEV_RANK = {'crit': 0, 'err': 1, 'warn': 2, 'ok': 3}
 
 
@@ -198,6 +235,10 @@ def _provider_entry(pid: str, s: Any, claude_profile: dict[str, Any] | None) -> 
     if pid == 'claude':
         entry['extra'] = _extra_usage(s)
         entry['installs'] = _installs()
+    elif pid == 'codex':
+        entry['installs'] = _codex_installs()
+    elif pid == 'antigravity':
+        entry['installs'] = _agy_installs()
     return entry
 
 
