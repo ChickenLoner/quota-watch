@@ -369,6 +369,29 @@ class UsagePopup:
         # Show after positioning (avoids flash at wrong position)
         self._win.show()
 
+        # Force keyboard focus — on_top=True keeps the window visually topmost
+        # but doesn't steal keyboard focus from the previously active window.
+        # Attach the foreground window's input queue to the WebView2 UI thread
+        # (the thread that owns hwnd) so SetForegroundWindow is permitted even
+        # after the RegisterHotKey foreground-lock has expired (~200 ms).
+        # Must use hwnd's owning thread — NOT GetCurrentThreadId(), which is
+        # the pywebview callback thread and unrelated to the window message queue.
+        if hwnd:
+            user32 = ctypes.windll.user32
+            fg = user32.GetForegroundWindow()
+            if fg and fg != hwnd:
+                tid_fg = user32.GetWindowThreadProcessId(fg, None)
+                tid_hw = user32.GetWindowThreadProcessId(hwnd, None)
+                if tid_fg != tid_hw:
+                    user32.AttachThreadInput(tid_fg, tid_hw, True)
+                    user32.BringWindowToTop(hwnd)
+                    user32.SetForegroundWindow(hwnd)
+                    user32.AttachThreadInput(tid_fg, tid_hw, False)
+                else:
+                    user32.SetForegroundWindow(hwnd)
+            else:
+                user32.SetForegroundWindow(hwnd)
+
     def _close(self) -> None:
         try:
             self._win.destroy()
