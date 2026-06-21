@@ -23,7 +23,7 @@ Inspired by [CodexBar](https://github.com/steipete/CodexBar) and [usage-monitor-
 - **Extra usage** — Claude credit balance if enabled
 - **CLI version discovery** — Claude Code (CLI + IDE extensions), Codex CLI, Antigravity CLI
 - **Changelog links** — jump straight to release notes for the active provider's CLI
-- **Global hotkey** — `Ctrl+Shift+Q` opens the popup from anywhere
+- **Global hotkeys** — `Ctrl+Shift+Q` opens the popup, `Ctrl+Shift+R` restarts, `Ctrl+Shift+X` quits, from anywhere
 - **Full keyboard navigation** — `←`/`→` Focus ↔ Grid, `↑`/`↓` switch provider (Focus) or scroll (Grid), `R` refresh, `T` theme, `C` compact density, `Esc` close — hover any button for the shortcut hint
 - **Start with Windows** — registry autostart (frozen EXE only)
 - **No console window** — silent background tray process

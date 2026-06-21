@@ -9,6 +9,7 @@ a = Analysis(
         ('monitor/html/popup.html', 'monitor/html'),
         ('monitor/html/popup.css',  'monitor/html'),
         ('monitor/html/popup.js',   'monitor/html'),
+        ('monitor/icon.png',        'monitor'),
     ],
     hiddenimports=[
         'pystray._win32',

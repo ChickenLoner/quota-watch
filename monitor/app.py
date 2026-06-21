@@ -14,10 +14,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-_MOD_CONTROL = 0x0002
-_MOD_SHIFT   = 0x0004
-_WM_HOTKEY   = 0x0312
-_HOTKEY_ID   = 1
+_MOD_CONTROL     = 0x0002
+_MOD_SHIFT       = 0x0004
+_WM_HOTKEY       = 0x0312
+_HOTKEY_SHOW     = 1
+_HOTKEY_RESTART  = 2
+_HOTKEY_QUIT     = 3
 
 import pystray  # type: ignore[import-untyped]
 
@@ -28,7 +30,7 @@ from .providers.codex import CodexProvider
 from .providers.windsurf import WindsurfProvider
 from .autostart import is_enabled as autostart_is_enabled, set_enabled as autostart_set, sync_path as autostart_sync
 from .formatting import countdown_short, elapsed_pct, field_period
-from .tray import create_icon, create_status_icon, taskbar_is_light, watch_theme
+from .tray import app_icon, taskbar_is_light, watch_theme
 
 POLL_INTERVAL      = 180
 POLL_FAST          = 30
@@ -109,19 +111,19 @@ class App:
 
         self.icon = pystray.Icon(
             'quota_watch',
-            icon=create_icon(0, 0),
+            icon=app_icon(),
             title='QuotaWatch',
             menu=pystray.Menu(
-                pystray.MenuItem('Show Status', self._on_show, default=True),
+                pystray.MenuItem('&Show Status\tCtrl+Shift+Q', self._on_show, default=True),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem(
-                    'Start with Windows', self._on_toggle_autostart,
+                    'Start with &Windows', self._on_toggle_autostart,
                     checked=lambda item: autostart_is_enabled(),
                     visible=frozen,
                 ),
-                pystray.MenuItem('Restart', self._on_restart),
+                pystray.MenuItem('&Restart\tCtrl+Shift+R', self._on_restart),
                 pystray.Menu.SEPARATOR,
-                pystray.MenuItem('Quit', self._on_quit),
+                pystray.MenuItem('&Quit\tCtrl+Shift+X', self._on_quit),
             ),
         )
 
@@ -163,7 +165,6 @@ class App:
 
     def _on_quit(self, icon: Any = None, item: Any = None) -> None:
         self._running = False
-        ctypes.windll.user32.UnregisterHotKey(None, _HOTKEY_ID)
         self.icon.stop()
 
     # ── Polling ──────────────────────────────────────────────────────────────
@@ -307,24 +308,8 @@ class App:
 
     def _render_tray(self, error: bool) -> None:
         if error:
-            self.icon.icon  = create_status_icon('!')
             self.icon.title = f'QuotaWatch - {self._last_error}'
             return
-
-        # Collect all fields sorted by utilization desc
-        all_fields = [
-            (snap.provider_name, f)
-            for snap in self._snapshots.values()
-            if not snap.error
-            for f in snap.fields
-        ]
-        all_fields.sort(key=lambda x: x[1].utilization, reverse=True)
-
-        top       = all_fields[0][1].utilization if len(all_fields) > 0 else 0
-        bot       = all_fields[1][1].utilization if len(all_fields) > 1 else 0
-        countdown = countdown_short(all_fields[0][1].resets_at or '') if all_fields else ''
-
-        self.icon.icon  = create_icon(top, bot, countdown=countdown)
         self.icon.title = self._build_tooltip()
 
     def _build_tooltip(self) -> str:
@@ -379,19 +364,27 @@ class App:
             self._light_taskbar = light
             self._render_tray(error=bool(self._last_error))
 
-    # ── Global hotkey (Ctrl+Shift+Q) ─────────────────────────────────────────
+    # ── Global hotkeys (Ctrl+Shift+Q/R/X) ────────────────────────────────────
 
     def _hotkey_loop(self) -> None:
-        user32 = ctypes.windll.user32
-        if not user32.RegisterHotKey(None, _HOTKEY_ID, _MOD_CONTROL | _MOD_SHIFT, ord('Q')):
-            return
+        user32   = ctypes.windll.user32
+        handlers = {
+            _HOTKEY_SHOW:    self._on_show,
+            _HOTKEY_RESTART: self._on_restart,
+            _HOTKEY_QUIT:    self._on_quit,
+        }
+        for hk_id, vk in ((_HOTKEY_SHOW, 'Q'), (_HOTKEY_RESTART, 'R'), (_HOTKEY_QUIT, 'X')):
+            user32.RegisterHotKey(None, hk_id, _MOD_CONTROL | _MOD_SHIFT, ord(vk))
+
         msg = ctypes.wintypes.MSG()
         while self._running:
             r = user32.PeekMessageW(ctypes.byref(msg), None, _WM_HOTKEY, _WM_HOTKEY, 1)
-            if r and msg.message == _WM_HOTKEY and msg.wParam == _HOTKEY_ID:
-                self._on_show()
+            if r and msg.message == _WM_HOTKEY and msg.wParam in handlers:
+                handlers[msg.wParam]()
             time.sleep(0.05)
-        user32.UnregisterHotKey(None, _HOTKEY_ID)
+
+        for hk_id in handlers:
+            user32.UnregisterHotKey(None, hk_id)
 
     # ── Popup ─────────────────────────────────────────────────────────────────
 

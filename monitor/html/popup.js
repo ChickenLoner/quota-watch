@@ -378,6 +378,7 @@ const shell = document.getElementById('qwShell');
 const panel = document.getElementById('qwPanel');
 
 function render() {
+  _cancelAnim();
   document.documentElement.setAttribute('data-theme', state.theme);
   panel.className = 'qw-panel' + (state.mode === 'grid' ? ' is-grid' : '');
   panel.innerHTML = state.mode === 'grid' ? _renderGrid() : _renderFocus();
@@ -397,11 +398,19 @@ function _measure() {
 
 /* animated mode / density transition ---------------------------------- */
 const _FADE_MS = 160;
-let _animating = false;
+let _animTimer  = null;
+let _staggerTimer = null;
+
+function _cancelAnim() {
+  if (_animTimer !== null)    { clearTimeout(_animTimer); _animTimer = null; }
+  if (_staggerTimer !== null) { clearTimeout(_staggerTimer); _staggerTimer = null; }
+}
 
 function _animatedRender() {
-  if (_animating) return;
-  _animating = true;
+  /* Cancel any in-flight transition instead of dropping this call — keeps
+     rapid key presses (arrows, R/T/C back-to-back) from being silently
+     ignored or racing a stale deferred render. */
+  _cancelAnim();
 
   /* Set target width immediately so shell starts resizing */
   const targetW = state.mode === 'grid' ? 440 : 360;
@@ -410,7 +419,9 @@ function _animatedRender() {
   /* Phase 1 — fade out current content */
   panel.classList.add('is-exit');
 
-  setTimeout(() => {
+  _animTimer = setTimeout(() => {
+    _animTimer = null;
+
     /* Phase 2 — swap content while invisible */
     document.documentElement.setAttribute('data-theme', state.theme);
     panel.className = 'qw-panel is-enter is-animated'
@@ -424,9 +435,11 @@ function _animatedRender() {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         panel.classList.remove('is-enter');
-        _animating = false;
         /* Remove stagger class after entrance animations finish */
-        setTimeout(() => panel.classList.remove('is-animated'), 600);
+        _staggerTimer = setTimeout(() => {
+          _staggerTimer = null;
+          panel.classList.remove('is-animated');
+        }, 600);
       });
     });
   }, _FADE_MS);
@@ -462,9 +475,13 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     return;
   }
-  if (e.key === 'r' || e.key === 'R') { _doSync(); e.preventDefault(); return; }
-  if (e.key === 'c' || e.key === 'C') { state.compact = !state.compact; _saveState(); _animatedRender(); e.preventDefault(); return; }
-  if (e.key === 't' || e.key === 'T') {
+  /* Use e.code (physical key, layout-independent) instead of e.key for
+     letter shortcuts — e.key reflects the active IME/keyboard layout
+     (e.g. Thai Kedmanee maps physical R/T/C to พ/ะ/แ), so e.key checks
+     silently no-op whenever a non-Latin layout is active. */
+  if (e.code === 'KeyR') { _doSync(); e.preventDefault(); return; }
+  if (e.code === 'KeyC') { state.compact = !state.compact; _saveState(); _animatedRender(); e.preventDefault(); return; }
+  if (e.code === 'KeyT') {
     state.theme = state.theme === 'dark' ? 'light' : 'dark';
     state.themeRot += 180;
     _saveState();
