@@ -372,8 +372,7 @@ class _PopupApi:
         if agy_path:
             subprocess.Popen(
                 [agy_path],
-                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
-                close_fds=True,
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
             )
 
 

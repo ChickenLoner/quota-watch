@@ -472,7 +472,7 @@ shell.addEventListener('click', (e) => {
     case 'launch_agy':
       if (typeof pywebview !== 'undefined') {
         pywebview.api.launch_agy();
-        setTimeout(_doSync, 5000);
+        setTimeout(_doSync, 8000);
       }
       break;
   }
