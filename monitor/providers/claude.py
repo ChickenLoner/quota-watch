@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,39 @@ _FIELD_LABELS: dict[str, str] = {
     'omelette_promotional': 'DESIGN PROMO',
 }
 
+_RATE_LIMIT_COOLDOWN = 300  # 5 min default when no Retry-After header
+_rate_limited_until: float = 0.0
+_cached_user_agent: str = ''
+
+
+def _user_agent() -> str:
+    global _cached_user_agent
+    if _cached_user_agent:
+        return _cached_user_agent
+    try:
+        from ..claude_cli import CLI_PATH, cli_version
+        v = cli_version(CLI_PATH) if CLI_PATH.is_file() else ''
+        _cached_user_agent = f'claude-code/{v or "2.1.0"}'
+    except Exception:
+        _cached_user_agent = 'claude-code/2.1.0'
+    return _cached_user_agent
+
+
+def _rate_limit_remaining() -> float:
+    """Seconds remaining in cooldown, or 0 if not rate-limited."""
+    return max(0.0, _rate_limited_until - time.time())
+
+
+def _record_rate_limit(retry_after_secs: float | None) -> None:
+    global _rate_limited_until
+    delay = retry_after_secs if (retry_after_secs and retry_after_secs > 0) else _RATE_LIMIT_COOLDOWN
+    _rate_limited_until = time.time() + delay
+
+
+def _clear_rate_limit() -> None:
+    global _rate_limited_until
+    _rate_limited_until = 0.0
+
 
 def _field_label(key: str) -> str:
     return _FIELD_LABELS.get(key, key.upper().replace('_', ' '))
@@ -54,6 +88,7 @@ def _auth_headers() -> dict[str, str] | None:
         'Authorization': f'Bearer {token}',
         'Content-Type': 'application/json',
         'anthropic-beta': 'oauth-2025-04-20',
+        'User-Agent': _user_agent(),
     }
 
 
@@ -94,18 +129,33 @@ class ClaudeProvider(Provider):
                 auth_error=True,
             )
 
+        remaining = _rate_limit_remaining()
+        if remaining > 0:
+            mins = max(1, int(remaining / 60) + 1)
+            return UsageSnapshot(self.provider_id, self.provider_name, [],
+                                 error=f'RATE LIMITED - retry in ~{mins}m')
+
         try:
             r = requests.get(_API_USAGE, headers=hdrs, timeout=10)
             r.raise_for_status()
             data = r.json()
+            _clear_rate_limit()
         except requests.HTTPError as e:
             code = e.response.status_code if e.response is not None else 0
             if code == 401:
                 return UsageSnapshot(self.provider_id, self.provider_name, [],
                                      error='TOKEN EXPIRED - refreshing...', auth_error=True)
             if code == 429:
+                ra: float | None = None
+                if e.response is not None:
+                    try:
+                        ra = float(e.response.headers.get('Retry-After', ''))
+                    except (ValueError, TypeError):
+                        pass
+                _record_rate_limit(ra)
+                mins = max(1, int(_rate_limit_remaining() / 60) + 1)
                 return UsageSnapshot(self.provider_id, self.provider_name, [],
-                                     error='RATE LIMITED')
+                                     error=f'RATE LIMITED - retry in ~{mins}m')
             if 500 <= code < 600:
                 return UsageSnapshot(self.provider_id, self.provider_name, [],
                                      error=f'SERVER ERROR {code}')

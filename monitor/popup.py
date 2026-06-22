@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -143,14 +144,6 @@ def _extra_usage(snap_data: Any) -> dict[str, Any] | None:
     }
 
 
-def _installs() -> list[dict[str, str]]:
-    try:
-        from .claude_cli import find_installations
-        return [{'name': i.name, 'version': i.version} for i in find_installations()]
-    except Exception:
-        return []
-
-
 def _run_version(path: str) -> str:
     try:
         proc = subprocess.run(
@@ -164,7 +157,15 @@ def _run_version(path: str) -> str:
         return ''
 
 
-def _codex_installs() -> list[dict[str, str]]:
+def _fetch_installs() -> list[dict[str, str]]:
+    try:
+        from .claude_cli import find_installations
+        return [{'name': i.name, 'version': i.version} for i in find_installations()]
+    except Exception:
+        return []
+
+
+def _fetch_codex_installs() -> list[dict[str, str]]:
     path = shutil.which('codex')
     if not path:
         return []
@@ -172,7 +173,7 @@ def _codex_installs() -> list[dict[str, str]]:
     return [{'name': 'CLI', 'version': v}] if v else []
 
 
-def _agy_installs() -> list[dict[str, str]]:
+def _fetch_agy_installs() -> list[dict[str, str]]:
     path = shutil.which('agy')
     if not path:
         local = Path(os.environ.get('LOCALAPPDATA', '')) / 'agy' / 'bin' / 'agy.exe'
@@ -184,7 +185,39 @@ def _agy_installs() -> list[dict[str, str]]:
     return [{'name': 'CLI', 'version': v}] if v else []
 
 
+def _installs() -> list[dict[str, str]]:
+    return _cached('claude', _fetch_installs)
+
+
+def _codex_installs() -> list[dict[str, str]]:
+    return _cached('codex', _fetch_codex_installs)
+
+
+def _agy_installs() -> list[dict[str, str]]:
+    return _cached('agy', _fetch_agy_installs)
+
+
 _SEV_RANK = {'crit': 0, 'err': 1, 'warn': 2, 'ok': 3}
+
+_install_cache: dict[str, tuple[float, list]] = {}
+_INSTALL_TTL = 300  # seconds
+
+
+def _cached(key: str, fn) -> list:
+    now = time.time()
+    entry = _install_cache.get(key)
+    if entry and now - entry[0] < _INSTALL_TTL:
+        return entry[1]
+    result = fn()
+    _install_cache[key] = (now, result)
+    return result
+
+
+def prewarm_installs() -> None:
+    """Pre-populate install caches from a background thread at startup."""
+    _installs()
+    _codex_installs()
+    _agy_installs()
 
 
 def _provider_entry(pid: str, s: Any, claude_profile: dict[str, Any] | None) -> dict[str, Any]:

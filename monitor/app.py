@@ -104,6 +104,7 @@ class App:
         self._error_count      = 0
         self._running          = True
         self.restart_requested = False
+        self._force_poll       = threading.Event()
 
         self._light_taskbar = taskbar_is_light()
 
@@ -151,6 +152,8 @@ class App:
             icon.notify('Claude: no token - run: claude auth login', 'QuotaWatch')
         watch_theme(self._on_theme_changed)
         threading.Thread(target=self._hotkey_loop, daemon=True).start()
+        from .popup import prewarm_installs
+        threading.Thread(target=prewarm_installs, daemon=True).start()
         self._ensure_profile()
         self._poll_loop()
 
@@ -165,6 +168,7 @@ class App:
 
     def _on_quit(self, icon: Any = None, item: Any = None) -> None:
         self._running = False
+        self._force_poll.set()
         self.icon.stop()
 
     # ── Polling ──────────────────────────────────────────────────────────────
@@ -182,8 +186,8 @@ class App:
 
             deadline = time.time() + interval
             self.next_poll_time = deadline
-            while self._running and time.time() < deadline:
-                time.sleep(1)
+            self._force_poll.wait(timeout=interval)
+            self._force_poll.clear()
 
     def _update(self) -> None:
         if not self._lock.acquire(blocking=False):
@@ -399,7 +403,7 @@ class App:
 
     def _open_popup(self) -> None:
         try:
-            self._ensure_profile()
+            threading.Thread(target=self._ensure_profile, daemon=True).start()
             from .popup import UsagePopup
             UsagePopup(self)
         except Exception:
@@ -414,7 +418,20 @@ class App:
         current_token = read_token()
         if self._profile is not None and self._profile_token == current_token:
             return
+        token_changed = self._profile_token is not None and self._profile_token != current_token
         profile = self._claude.fetch_profile()
         with self._lock:
             self._profile       = profile
             self._profile_token = current_token
+            if token_changed:
+                self._snapshots.pop('claude', None)
+                self._prev_utilization = {
+                    k: v for k, v in self._prev_utilization.items()
+                    if not k.startswith('claude:')
+                }
+                self._notified_thresholds = {
+                    k: v for k, v in self._notified_thresholds.items()
+                    if not k.startswith('claude:')
+                }
+        if token_changed:
+            self._force_poll.set()
