@@ -429,21 +429,37 @@ class UsagePopup:
         # after the RegisterHotKey foreground-lock has expired (~200 ms).
         # Must use hwnd's owning thread — NOT GetCurrentThreadId(), which is
         # the pywebview callback thread and unrelated to the window message queue.
+        # SetForegroundWindow's return value is unreliable under the lock, so
+        # verify with GetForegroundWindow and retry a few times instead of
+        # trusting a single call.
         if hwnd:
             user32 = ctypes.windll.user32
             fg = user32.GetForegroundWindow()
-            if fg and fg != hwnd:
-                tid_fg = user32.GetWindowThreadProcessId(fg, None)
-                tid_hw = user32.GetWindowThreadProcessId(hwnd, None)
-                if tid_fg != tid_hw:
-                    user32.AttachThreadInput(tid_fg, tid_hw, True)
-                    user32.BringWindowToTop(hwnd)
-                    user32.SetForegroundWindow(hwnd)
-                    user32.AttachThreadInput(tid_fg, tid_hw, False)
-                else:
-                    user32.SetForegroundWindow(hwnd)
-            else:
+            tid_fg = user32.GetWindowThreadProcessId(fg, None) if fg else 0
+            tid_hw = user32.GetWindowThreadProcessId(hwnd, None)
+            attached = False
+            if fg and fg != hwnd and tid_fg != tid_hw:
+                user32.AttachThreadInput(tid_fg, tid_hw, True)
+                attached = True
+            user32.BringWindowToTop(hwnd)
+            for _ in range(5):
                 user32.SetForegroundWindow(hwnd)
+                if user32.GetForegroundWindow() == hwnd:
+                    break
+                time.sleep(0.05)
+            if attached:
+                user32.AttachThreadInput(tid_fg, tid_hw, False)
+            user32.SetFocus(hwnd)
+
+        # Belt-and-suspenders: ask the WebView2 renderer itself to take DOM
+        # focus now that the OS-level window is (hopefully) active. Without
+        # this, keydown listeners on `document` can stay dead even though
+        # the window looks frontmost, since OS activation doesn't always
+        # hand keyboard input down into the Chromium child control.
+        try:
+            self._win.evaluate_js('focusWindow()')
+        except Exception:
+            pass
 
     def _close(self) -> None:
         try:

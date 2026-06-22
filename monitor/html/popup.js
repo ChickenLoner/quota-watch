@@ -582,6 +582,7 @@ function init(payload) {
     state.active = state.data.providers[0].id;
   }
   render();
+  window.focus();
   // First poll not done yet — auto-refresh once data arrives
   if (!state.data.providers.length) {
     setTimeout(_doSync, 800);
@@ -592,4 +593,9 @@ function refreshDone(payload) {
   state.data    = normalize(payload);
   state.syncing = false;
   render();
+  window.focus();
+}
+
+function focusWindow() {
+  window.focus();
 }
