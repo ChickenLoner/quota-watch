@@ -173,12 +173,17 @@ def _fetch_codex_installs() -> list[dict[str, str]]:
     return [{'name': 'CLI', 'version': v}] if v else []
 
 
-def _fetch_agy_installs() -> list[dict[str, str]]:
+def _find_agy_path() -> str | None:
     path = shutil.which('agy')
     if not path:
         local = Path(os.environ.get('LOCALAPPDATA', '')) / 'agy' / 'bin' / 'agy.exe'
         if local.is_file():
-            path = str(local)
+            return str(local)
+    return path
+
+
+def _fetch_agy_installs() -> list[dict[str, str]]:
+    path = _find_agy_path()
     if not path:
         return []
     v = _run_version(path)
@@ -221,7 +226,8 @@ def prewarm_installs() -> None:
 
 
 def _provider_entry(pid: str, s: Any, claude_profile: dict[str, Any] | None) -> dict[str, Any]:
-    bars = [_bar_entry(f) for f in s.fields] if not s.error else []
+    stale = getattr(s, 'stale', False)
+    bars = [_bar_entry(f) for f in s.fields]  # always build; stale snapshots carry cached fields
 
     auth_status = 'connected'
     re_auth_hint = None
@@ -229,6 +235,9 @@ def _provider_entry(pid: str, s: Any, claude_profile: dict[str, Any] | None) -> 
     if s.auth_error:
         auth_status = 'auth_error'
         re_auth_hint = _RE_AUTH_HINTS.get(pid)
+        error_text = s.error
+    elif stale:
+        auth_status = 'connected'
         error_text = s.error
     elif s.error:
         auth_status = 'error'
@@ -258,6 +267,7 @@ def _provider_entry(pid: str, s: Any, claude_profile: dict[str, Any] | None) -> 
         'authStatus':  auth_status,
         'reAuthHint':  re_auth_hint,
         'errorText':   error_text,
+        'stale':       stale,
         'statusSev':   worst,
         'bars':           bars,
         'extra':          None,
@@ -272,6 +282,7 @@ def _provider_entry(pid: str, s: Any, claude_profile: dict[str, Any] | None) -> 
         entry['installs'] = _codex_installs()
     elif pid == 'antigravity':
         entry['installs'] = _agy_installs()
+        entry['canLaunchAgy'] = _find_agy_path() is not None
     return entry
 
 
@@ -354,6 +365,16 @@ class _PopupApi:
     def report_height(self, height: int) -> None:
         """Backward-compat shim — delegates to report_size with last known width."""
         self.report_size(self._popup._last_w, height)
+
+    def launch_agy(self) -> None:
+        """Launch agy as a detached background process (no-op if not found)."""
+        agy_path = _find_agy_path()
+        if agy_path:
+            subprocess.Popen(
+                [agy_path],
+                creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
+                close_fds=True,
+            )
 
 
 class UsagePopup:

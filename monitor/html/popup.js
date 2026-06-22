@@ -160,9 +160,12 @@ function _errorBlock(p) {
   const icon = p.authStatus === 'auth_error' ? '⚠' : '⚡';
   const msg  = p.errorText || (p.authStatus === 'auth_error' ? 'Authentication required.' : 'Unavailable.');
   const hint = p.reAuthHint ? `<div class="hint">${esc(p.reAuthHint)}</div>` : '';
+  const launchBtn = (p.id === 'antigravity' && p.errorText === 'Run agy to see quota' && p.canLaunchAgy)
+    ? `<button class="qw-launch-btn" data-act="launch_agy">&#9654; Launch agy</button>`
+    : '';
   return `<div class="qw-error">
     <span class="ico">${icon}</span>
-    <div><div class="msg">${esc(msg)}</div>${hint}</div>
+    <div><div class="msg">${esc(msg)}</div>${hint}${launchBtn}</div>
   </div>`;
 }
 
@@ -274,7 +277,10 @@ function _renderFocus() {
   if (!active.bars || active.bars.length === 0) {
     body = _errorBlock(active);
   } else {
-    body = `<div class="qw-bars">${active.bars.map(_bigBar).join('')}</div>`;
+    const staleNotice = (active.stale && active.errorText)
+      ? `<div class="qw-stale-notice">&#9888; ${esc(active.errorText)}</div>`
+      : '';
+    body = staleNotice + `<div class="qw-bars">${active.bars.map(_bigBar).join('')}</div>`;
     if (active.id === 'claude') {
       body += _extraBlock(active.extra);
       body += _installsBlock(active.installs, active.changelog_url, 'CLAUDE CODE');
@@ -338,9 +344,12 @@ function _renderGrid() {
 
     let cardBody;
     if (!p.bars || p.bars.length === 0) {
-      cardBody = `<div class="qw-card-bars">${_errorBlock(p)}</div>`;
+      cardBody = _errorBlock(p);
     } else {
-      let bars = `<div class="qw-card-bars">${p.bars.map(_cardBar).join('')}</div>`;
+      const staleNotice = (p.stale && p.errorText)
+        ? `<div class="qw-stale-notice qw-stale-card">&#9888; ${esc(p.errorText)}</div>`
+        : '';
+      let bars = staleNotice + `<div class="qw-card-bars">${p.bars.map(_cardBar).join('')}</div>`;
       if (p.id === 'claude') {
         bars += _extraBlock(p.extra);
         bars += _installsBlock(p.installs, p.changelog_url, 'CLAUDE CODE');
@@ -457,9 +466,15 @@ shell.addEventListener('click', (e) => {
     case 'menu':      state.menuOpen = !state.menuOpen; render(); break;
     case 'density':   state.compact = !state.compact; _saveState(); _animatedRender(); break;
     case 'theme':     state.theme = state.theme === 'dark' ? 'light' : 'dark'; state.themeRot += 180; _saveState(); render(); break;
-    case 'sync':      _doSync(); break;
-    case 'close':     if (typeof pywebview !== 'undefined') pywebview.api.close(); break;
-    case 'changelog': if (typeof pywebview !== 'undefined') pywebview.api.open_url(act.dataset.url || ''); break;
+    case 'sync':       _doSync(); break;
+    case 'close':      if (typeof pywebview !== 'undefined') pywebview.api.close(); break;
+    case 'changelog':  if (typeof pywebview !== 'undefined') pywebview.api.open_url(act.dataset.url || ''); break;
+    case 'launch_agy':
+      if (typeof pywebview !== 'undefined') {
+        pywebview.api.launch_agy();
+        setTimeout(_doSync, 5000);
+      }
+      break;
   }
 });
 
@@ -554,6 +569,8 @@ function normalize(payload) {
     p.statusSev  = p.statusSev  || 'ok';
     p.errorText  = p.errorText  || null;
     p.reAuthHint = p.reAuthHint || null;
+    p.stale        = p.stale        || false;
+    p.canLaunchAgy = p.canLaunchAgy || false;
   });
   return payload;
 }
@@ -565,6 +582,10 @@ function init(payload) {
     state.active = state.data.providers[0].id;
   }
   render();
+  // First poll not done yet — auto-refresh once data arrives
+  if (!state.data.providers.length) {
+    setTimeout(_doSync, 800);
+  }
 }
 
 function refreshDone(payload) {

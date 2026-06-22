@@ -173,6 +173,27 @@ class App:
 
     # ── Polling ──────────────────────────────────────────────────────────────
 
+    def _earliest_reset_within(self, interval: float) -> float | None:
+        """Return the earliest resets_at timestamp within the next interval, or None."""
+        now = time.time()
+        cutoff = now + interval + 5  # include resets up to 5s past the interval end
+        earliest: float | None = None
+        with self._lock:
+            for snap in self._snapshots.values():
+                for f in snap.fields:
+                    if not f.resets_at:
+                        continue
+                    try:
+                        ts = datetime.fromisoformat(
+                            f.resets_at.replace('Z', '+00:00')
+                        ).timestamp()
+                        if now < ts < cutoff:
+                            if earliest is None or ts < earliest:
+                                earliest = ts
+                    except Exception:
+                        pass
+        return earliest
+
     def _poll_loop(self) -> None:
         while self._running:
             self._update()
@@ -185,8 +206,12 @@ class App:
                 interval = POLL_INTERVAL
 
             deadline = time.time() + interval
+            # Wake up 5s after any quota reset that falls within this interval
+            reset_ts = self._earliest_reset_within(interval)
+            if reset_ts is not None:
+                deadline = min(deadline, reset_ts + 5)
             self.next_poll_time = deadline
-            self._force_poll.wait(timeout=interval)
+            self._force_poll.wait(timeout=max(1.0, deadline - time.time()))
             self._force_poll.clear()
 
     def _update(self) -> None:

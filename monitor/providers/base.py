@@ -22,6 +22,7 @@ class UsageSnapshot:
     error: str | None = None
     auth_error: bool = False
     extras: dict[str, Any] = field(default_factory=dict)
+    stale: bool = False
 
 
 class Provider(ABC):

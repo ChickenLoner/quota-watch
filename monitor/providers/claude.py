@@ -115,6 +115,9 @@ class ClaudeProvider(Provider):
     provider_id   = 'claude'
     provider_name = 'Claude'
 
+    def __init__(self) -> None:
+        self._last_fields: list[QuotaField] = []
+
     def is_available(self) -> bool:
         return read_token() is not None
 
@@ -132,6 +135,10 @@ class ClaudeProvider(Provider):
         remaining = _rate_limit_remaining()
         if remaining > 0:
             mins = max(1, int(remaining / 60) + 1)
+            if self._last_fields:
+                return UsageSnapshot(self.provider_id, self.provider_name, self._last_fields,
+                                     error=f'RATE LIMITED - showing old data, retry in ~{mins}m',
+                                     stale=True)
             return UsageSnapshot(self.provider_id, self.provider_name, [],
                                  error=f'RATE LIMITED - retry in ~{mins}m')
 
@@ -154,6 +161,10 @@ class ClaudeProvider(Provider):
                         pass
                 _record_rate_limit(ra)
                 mins = max(1, int(_rate_limit_remaining() / 60) + 1)
+                if self._last_fields:
+                    return UsageSnapshot(self.provider_id, self.provider_name, self._last_fields,
+                                         error=f'RATE LIMITED - showing old data, retry in ~{mins}m',
+                                         stale=True)
                 return UsageSnapshot(self.provider_id, self.provider_name, [],
                                      error=f'RATE LIMITED - retry in ~{mins}m')
             if 500 <= code < 600:
@@ -169,6 +180,7 @@ class ClaudeProvider(Provider):
                                  error='UNKNOWN ERROR')
 
         fields, extras = _parse_response(data)
+        self._last_fields = fields
         return UsageSnapshot(
             provider_id=self.provider_id,
             provider_name=self.provider_name,
