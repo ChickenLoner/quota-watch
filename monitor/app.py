@@ -29,7 +29,7 @@ from .providers.claude import ClaudeProvider, read_token
 from .providers.codex import CodexProvider
 from .providers.windsurf import WindsurfProvider
 from .autostart import is_enabled as autostart_is_enabled, set_enabled as autostart_set, sync_path as autostart_sync
-from .formatting import countdown_short, elapsed_pct, field_period
+from .formatting import countdown_short, elapsed_pct, field_period, thresholds_for
 from .tray import app_icon, taskbar_is_light, watch_theme
 
 POLL_INTERVAL      = 180
@@ -37,12 +37,6 @@ POLL_FAST          = 30
 _POLL_ERROR_STEPS  = [30, 60, 120, 240, 600]  # backoff ramp on repeated errors
 
 _STATUS_CACHE = Path.home() / '.claude' / 'cache' / 'soc-monitor-status.json'
-
-_THRESHOLDS: dict[str, list[float]] = {
-    'five_hour': [50, 80, 95],
-    'seven_day': [95],
-}
-
 
 def _at_limit_skip(snap: 'UsageSnapshot') -> bool:
     """True when primary field is at 100% and reset hasn't passed yet (+5 min grace)."""
@@ -56,17 +50,6 @@ def _at_limit_skip(snap: 'UsageSnapshot') -> bool:
         return datetime.now(timezone.utc) < reset + timedelta(minutes=5)
     except Exception:
         return False
-
-
-def _thresholds_for(key: str) -> list[float]:
-    if key in _THRESHOLDS:
-        return _THRESHOLDS[key]
-    parts = key.split('_', 2)
-    if len(parts) >= 2:
-        base = f'{parts[0]}_{parts[1]}'
-        if base in _THRESHOLDS:
-            return _THRESHOLDS[base]
-    return []
 
 
 @dataclass
@@ -308,7 +291,7 @@ class App:
 
         for composite_key, pct in pct_map.items():
             field_key = composite_key.split(':', 1)[1] if ':' in composite_key else composite_key
-            thresholds = _thresholds_for(field_key)
+            thresholds = thresholds_for(field_key)
             if not thresholds:
                 continue
 

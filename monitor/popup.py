@@ -21,7 +21,7 @@ _WS_EX_TOOLWINDOW   = 0x00000080
 import webview  # type: ignore[import-untyped]
 
 from . import __version__
-from .formatting import elapsed_pct, field_period
+from .formatting import sev_for
 
 if TYPE_CHECKING:
     from .app import App
@@ -113,12 +113,9 @@ _ORDER = ['claude', 'codex', 'windsurf', 'antigravity']
 
 
 def _bar_entry(f: Any) -> dict[str, Any]:
-    pct      = f.utilization
-    resets   = f.resets_at or ''
-    period   = field_period(f.key)
-    time_pct = elapsed_pct(resets, period) if period else None
-    warn     = time_pct is not None and pct > time_pct
-    sev      = 'crit' if pct >= 90 else ('warn' if warn else 'ok')
+    pct    = f.utilization
+    resets = f.resets_at or ''
+    sev    = sev_for(f.key, pct)
     return {
         'key':        f.key,
         'label':      f.label,

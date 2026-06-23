@@ -9,6 +9,35 @@ _NUMBER_WORDS = {
 }
 _UNIT_SUFFIXES = {'hour': 'h', 'day': 'd'}
 
+_THRESHOLDS: dict[str, list[float]] = {
+    'five_hour': [50, 80, 95],
+    'seven_day': [70, 95],
+}
+
+
+def thresholds_for(key: str) -> list[float]:
+    """Return configured warn/crit thresholds for a field key, falling back to its base period."""
+    if key in _THRESHOLDS:
+        return _THRESHOLDS[key]
+    parts = key.split('_', 2)
+    if len(parts) >= 2:
+        base = f'{parts[0]}_{parts[1]}'
+        if base in _THRESHOLDS:
+            return _THRESHOLDS[base]
+    return []
+
+
+def sev_for(key: str, pct: float) -> str:
+    """ok / warn / crit for a field's raw utilization, using absolute thresholds."""
+    thresholds = thresholds_for(key)
+    if not thresholds:
+        return 'crit' if pct >= 90 else 'ok'
+    if pct >= thresholds[-1]:
+        return 'crit'
+    if pct >= thresholds[0]:
+        return 'warn'
+    return 'ok'
+
 
 def field_period(field: str) -> int | None:
     """Return period in seconds for a field key, or None."""

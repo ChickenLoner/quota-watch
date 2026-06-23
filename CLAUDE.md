@@ -38,7 +38,7 @@ Current providers: `ClaudeProvider`, `CodexProvider`, `WindsurfProvider`, `Antig
 
 ### Alert keys
 Composite format: `"{provider_id}:{field_key}"` e.g. `"claude:five_hour"`.
-Thresholds live in `app.py:_THRESHOLDS`.
+Thresholds live in `formatting.py:_THRESHOLDS` (shared by `app.py` notifications and `popup.py` bar color via `sev_for()`).
 
 ### Popup data flow
 `app.py:_write_status_cache()` → `popup.py:_build_payload()` → `popup.js:init()/refreshDone()`
