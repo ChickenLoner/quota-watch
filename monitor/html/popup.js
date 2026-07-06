@@ -583,10 +583,10 @@ function init(payload) {
   }
   render();
   window.focus();
-  // First poll not done yet — auto-refresh once data arrives
-  if (!state.data.providers.length) {
-    setTimeout(_doSync, 800);
-  }
+  // Always pull fresh data when the popup opens: show cached values instantly,
+  // then fetch the latest right away. Longer delay on a cold start (no cached
+  // data yet) so the webview settles before the first fetch.
+  setTimeout(_doSync, state.data.providers.length ? 50 : 800);
 }
 
 function refreshDone(payload) {
