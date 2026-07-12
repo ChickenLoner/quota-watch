@@ -12,29 +12,22 @@ Or with pytest:  uv run python -m pytest tests/test_threshold_alerts.py
 from __future__ import annotations
 
 import sys
-import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from monitor.app import App
+from monitor.alerts import AlertManager
 
 
 def _new_app():
-    app = App.__new__(App)  # skip __init__ (avoids building the pystray icon)
-    app._notified_thresholds = {}
-    app._prev_utilization = {}
     fired: list[str] = []
-    app.icon = types.SimpleNamespace(notify=lambda msg, title=None: fired.append(msg))
-    return app, fired
+    am = AlertManager(lambda msg, title=None: fired.append(msg))
+    return am, fired
 
 
 def _poll(app, pct: float, time_pct: float) -> None:
-    """One poll of Claude five_hour at `pct` used, window `time_pct` elapsed."""
-    pct_map = {'claude:five_hour': pct}
-    app._check_reset_alerts(pct_map)
-    app._check_threshold_alerts(pct_map)
-    app._prev_utilization = pct_map  # mimic end of _update()
+    """One poll of Claude five_hour at `pct` used (`time_pct` retained for signature)."""
+    app.process({'claude:five_hour': pct})
 
 
 def test_under_pace_still_warns_near_limit():

@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from monitor.popup import _bar_entry
+from monitor.payload import _bar_entry
 from monitor.providers.base import QuotaField
 
 

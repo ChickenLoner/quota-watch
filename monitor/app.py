@@ -28,8 +28,9 @@ from .providers.antigravity import AntigravityProvider
 from .providers.claude import ClaudeProvider, read_token
 from .providers.codex import CodexProvider
 from .providers.windsurf import WindsurfProvider
+from .alerts import AlertManager
 from .autostart import is_enabled as autostart_is_enabled, set_enabled as autostart_set, sync_path as autostart_sync
-from .formatting import countdown_short, field_period, parse_iso
+from .formatting import countdown_short, parse_iso
 from .tray import app_icon, taskbar_is_light, watch_theme
 
 POLL_INTERVAL      = 180
@@ -37,22 +38,6 @@ POLL_FAST          = 30
 _POLL_ERROR_STEPS  = [30, 60, 120, 240, 600]  # backoff ramp on repeated errors
 
 _STATUS_CACHE = Path.home() / '.claude' / 'cache' / 'soc-monitor-status.json'
-
-_THRESHOLDS: dict[str, list[float]] = {
-    'five_hour': [50, 80, 95],
-    'seven_day': [95],
-}
-
-
-def _thresholds_for(key: str) -> list[float]:
-    if key in _THRESHOLDS:
-        return _THRESHOLDS[key]
-    parts = key.split('_', 2)
-    if len(parts) >= 2:
-        base = f'{parts[0]}_{parts[1]}'
-        if base in _THRESHOLDS:
-            return _THRESHOLDS[base]
-    return []
 
 
 def _field_dict(f: Any) -> dict[str, Any]:
@@ -106,9 +91,6 @@ class App:
         self._popup_closed_at  = 0.0
         self.next_poll_time:   float | None = None
 
-        # Alert state — keyed by "{provider_id}:{field_key}"
-        self._prev_utilization:    dict[str, float] = {}
-        self._notified_thresholds: dict[str, float] = {}
         self._first_update_done    = False
 
         self._fast_polls       = 0
@@ -139,6 +121,8 @@ class App:
             ),
         )
 
+        self._alerts = AlertManager(self.icon.notify)
+
     # ── Public ──────────────────────────────────────────────────────────────
 
     def run(self) -> None:
@@ -163,7 +147,7 @@ class App:
             icon.notify('Claude: no token - run: claude auth login', 'QuotaWatch')
         watch_theme(self._on_theme_changed)
         threading.Thread(target=self._hotkey_loop, daemon=True).start()
-        from .popup import prewarm_installs
+        from .payload import prewarm_installs
         threading.Thread(target=prewarm_installs, daemon=True).start()
         self._ensure_profile()
         self._poll_loop()
@@ -287,71 +271,24 @@ class App:
                 for f in snap.fields:
                     pct_map[f'{pid}:{f.key}'] = f.utilization
 
-            self._check_reset_alerts(pct_map)
-            self._check_threshold_alerts(pct_map)
+            # Read the prior value for the fast-poll check BEFORE process()
+            # overwrites the baseline, then run reset + threshold alerts.
+            primary_key  = 'claude:five_hour'
+            primary_prev = self._alerts.previous(primary_key)
+            self._alerts.process(pct_map)
 
             # Adaptive fast-poll: trigger when Claude's session field is rising
-            primary_key  = 'claude:five_hour'
-            primary_pct  = pct_map.get(primary_key, 0)
-            primary_prev = self._prev_utilization.get(primary_key)
+            primary_pct = pct_map.get(primary_key, 0)
             if primary_prev is not None and primary_pct > primary_prev:
                 self._fast_polls = 3
             elif self._fast_polls > 0:
                 self._fast_polls -= 1
 
-            self._prev_utilization  = pct_map
             self._first_update_done = True
             self._render_tray(error=False)
             self._write_status_cache(ok)
         finally:
             self._poll_lock.release()
-
-    # ── Alerts ───────────────────────────────────────────────────────────────
-
-    def _check_reset_alerts(self, pct_map: dict[str, float]) -> None:
-        """Notify when a nearly-exhausted quota resets (usage drops)."""
-        for composite_key, pct in pct_map.items():
-            prev = self._prev_utilization.get(composite_key)
-            if prev is None:
-                continue
-
-            any_blocking = any(
-                other_pct >= 99
-                for other_key, other_pct in pct_map.items()
-                if other_key != composite_key
-            )
-
-            field_key = composite_key.split(':', 1)[1] if ':' in composite_key else composite_key
-            period    = field_period(field_key)
-            reset_threshold = 95 if (period and period <= 5 * 3600) else 98
-            if prev > reset_threshold and pct < prev and not any_blocking:
-                self.icon.notify('Quota reset - usage cleared', 'QuotaWatch')
-                self._notified_thresholds[composite_key] = 0
-
-    def _check_threshold_alerts(self, pct_map: dict[str, float]) -> None:
-        """Notify once each time usage crosses a configured threshold upward.
-
-        No pace weighting: a crossing always alerts. Being "on pace" doesn't
-        change that you're running low, which is exactly when the warning matters.
-        """
-        for composite_key, pct in pct_map.items():
-            field_key = composite_key.split(':', 1)[1] if ':' in composite_key else composite_key
-            thresholds = _thresholds_for(field_key)
-            if not thresholds:
-                continue
-
-            exceeded      = [t for t in thresholds if pct >= t]
-            highest       = max(exceeded) if exceeded else 0
-            last_notified = self._notified_thresholds.get(composite_key, 0)
-
-            if highest > last_notified:
-                pid   = composite_key.split(':', 1)[0] if ':' in composite_key else ''
-                label = f'{pid.upper()}: {field_key.replace("_", " ").upper()}' if pid else field_key.upper()
-                self.icon.notify(f'{label}: {pct:.0f}% used', 'QuotaWatch - Usage Alert')
-                self._notified_thresholds[composite_key] = highest
-
-            elif highest < last_notified:
-                self._notified_thresholds[composite_key] = highest
 
     # ── Rendering ────────────────────────────────────────────────────────────
 
@@ -455,13 +392,6 @@ class App:
             self._profile_token = current_token
             if token_changed:
                 self._snapshots.pop('claude', None)
-                self._prev_utilization = {
-                    k: v for k, v in self._prev_utilization.items()
-                    if not k.startswith('claude:')
-                }
-                self._notified_thresholds = {
-                    k: v for k, v in self._notified_thresholds.items()
-                    if not k.startswith('claude:')
-                }
+                self._alerts.forget('claude:')
         if token_changed:
             self._force_poll.set()
