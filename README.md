@@ -24,7 +24,7 @@ Inspired by [CodexBar](https://github.com/steipete/CodexBar) and [usage-monitor-
 - **Severity badges** - NOMINAL / WARNING / CRITICAL / BREACH on each bar
 - **Provider logos** - real Claude / Codex / Antigravity icons in tabs and dropdown, not plain dots
 - **Grid sorted by health** - healthiest provider listed first, so you know where to switch
-- **Smart alerts** - tray notifications at 50%, 80%, 95% session; 95% weekly; time-aware (skips if usage is proportionally on-track)
+- **Smart alerts** - tray notifications at 50%, 80%, 95% session; 95% weekly; each threshold fires once per window and re-arms on reset
 - **Reset detection** - notifies when quota resets after near-exhaustion
 - **Adaptive polling** - 3-min normally, 30s when session usage is rising
 - **Extra usage** - Claude credit balance if enabled
@@ -82,6 +82,14 @@ See [`linux/README.md`](linux/README.md) for details.
 ### Pre-built EXE
 
 Download `QuotaWatch.exe` from [Releases](../../releases) and run. No installation needed.
+
+> **Blocked by Smart App Control?** The EXE is not code-signed yet, so Windows 11's Smart App Control (SAC) blocks it as an unknown app. SAC has no "Run anyway" button and no per-app allowlist, so you have to turn it off to run an unsigned app you trust:
+>
+> 1. Open **Windows Security** → **App & browser control** → under *Smart App Control*, click **Smart App Control settings**
+> 2. Switch **Smart App Control** to **Off**
+> 3. Run `QuotaWatch.exe`
+>
+> Recent Windows 11 builds let you turn SAC back **On** afterward; older builds require a Windows reset to re-enable it. Prefer not to touch SAC? Run [from source](#from-source) instead — `python.exe` is already trusted, so SAC allows it (you only lose the "Start with Windows" menu item, which is EXE-only).
 
 ### From source
 

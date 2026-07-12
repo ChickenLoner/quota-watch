@@ -29,7 +29,7 @@ from .providers.claude import ClaudeProvider, read_token
 from .providers.codex import CodexProvider
 from .providers.windsurf import WindsurfProvider
 from .autostart import is_enabled as autostart_is_enabled, set_enabled as autostart_set, sync_path as autostart_sync
-from .formatting import countdown_short, elapsed_pct, field_period, thresholds_for
+from .formatting import countdown_short, field_period
 from .tray import app_icon, taskbar_is_light, watch_theme
 
 POLL_INTERVAL      = 180
@@ -37,6 +37,23 @@ POLL_FAST          = 30
 _POLL_ERROR_STEPS  = [30, 60, 120, 240, 600]  # backoff ramp on repeated errors
 
 _STATUS_CACHE = Path.home() / '.claude' / 'cache' / 'soc-monitor-status.json'
+
+_THRESHOLDS: dict[str, list[float]] = {
+    'five_hour': [50, 80, 95],
+    'seven_day': [95],
+}
+
+
+def _thresholds_for(key: str) -> list[float]:
+    if key in _THRESHOLDS:
+        return _THRESHOLDS[key]
+    parts = key.split('_', 2)
+    if len(parts) >= 2:
+        base = f'{parts[0]}_{parts[1]}'
+        if base in _THRESHOLDS:
+            return _THRESHOLDS[base]
+    return []
+
 
 def _at_limit_skip(snap: 'UsageSnapshot') -> bool:
     """True when primary field is at 100% and reset hasn't passed yet (+5 min grace)."""
@@ -239,7 +256,7 @@ class App:
                 pct_map[f'{pid}:{f.key}'] = f.utilization
 
         self._check_reset_alerts(pct_map)
-        self._check_threshold_alerts(ok, pct_map)
+        self._check_threshold_alerts(pct_map)
 
         # Adaptive fast-poll: trigger when Claude's session field is rising
         claude_snap  = ok.get('claude')
@@ -278,20 +295,15 @@ class App:
                 self.icon.notify('Quota reset - usage cleared', 'QuotaWatch')
                 self._notified_thresholds[composite_key] = 0
 
-    def _check_threshold_alerts(
-        self,
-        ok: dict[str, UsageSnapshot],
-        pct_map: dict[str, float],
-    ) -> None:
-        """Notify when usage crosses a configured threshold."""
-        field_lookup: dict[str, Any] = {}
-        for pid, snap in ok.items():
-            for f in snap.fields:
-                field_lookup[f'{pid}:{f.key}'] = f
+    def _check_threshold_alerts(self, pct_map: dict[str, float]) -> None:
+        """Notify once each time usage crosses a configured threshold upward.
 
+        No pace weighting: a crossing always alerts. Being "on pace" doesn't
+        change that you're running low, which is exactly when the warning matters.
+        """
         for composite_key, pct in pct_map.items():
             field_key = composite_key.split(':', 1)[1] if ':' in composite_key else composite_key
-            thresholds = thresholds_for(field_key)
+            thresholds = _thresholds_for(field_key)
             if not thresholds:
                 continue
 
@@ -300,14 +312,6 @@ class App:
             last_notified = self._notified_thresholds.get(composite_key, 0)
 
             if highest > last_notified:
-                f      = field_lookup.get(composite_key)
-                period = field_period(field_key)
-                if period and f:
-                    time_pct = elapsed_pct(f.resets_at or '', period)
-                    if time_pct is not None and pct <= time_pct:
-                        self._notified_thresholds[composite_key] = highest
-                        continue
-
                 pid   = composite_key.split(':', 1)[0] if ':' in composite_key else ''
                 label = f'{pid.upper()}: {field_key.replace("_", " ").upper()}' if pid else field_key.upper()
                 self.icon.notify(f'{label}: {pct:.0f}% used', 'QuotaWatch - Usage Alert')
