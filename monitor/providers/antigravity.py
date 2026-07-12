@@ -120,19 +120,34 @@ class AntigravityProvider(Provider):
     provider_id   = 'antigravity'
     provider_name = 'Antigravity'
 
+    def __init__(self) -> None:
+        self._port: int | None = None   # last known agy port, to skip the port scan
+
     def is_available(self) -> bool:
         return _CONFIG_DIR.exists()
 
-    def fetch(self) -> UsageSnapshot:
-        for port in _agy_local_ports():
-            data = _local_get_user_status(port)
-            if data:
-                fields, extras = _fields_from_user_status(data)
-                if fields:
-                    fields.sort(key=lambda f: f.utilization, reverse=True)
-                    return UsageSnapshot(self.provider_id, self.provider_name, fields, extras=extras)
+    def _snapshot_from_port(self, port: int) -> UsageSnapshot | None:
+        data = _local_get_user_status(port)
+        if not data:
+            return None
+        fields, extras = _fields_from_user_status(data)
+        if not fields:
+            return None
+        fields.sort(key=lambda f: f.utilization, reverse=True)
+        return self._ok(fields, extras)
 
-        return UsageSnapshot(
-            self.provider_id, self.provider_name, [],
-            error='Run agy to see quota',
-        )
+    def fetch(self) -> UsageSnapshot:
+        # Happy path: reuse the cached port and skip the powershell + netstat scan.
+        if self._port is not None:
+            snap = self._snapshot_from_port(self._port)
+            if snap is not None:
+                return snap
+            self._port = None  # cached port went away — fall through to a rescan
+
+        for port in _agy_local_ports():
+            snap = self._snapshot_from_port(port)
+            if snap is not None:
+                self._port = port
+                return snap
+
+        return self._err('Run agy to see quota')

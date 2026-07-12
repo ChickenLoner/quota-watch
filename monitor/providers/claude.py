@@ -7,9 +7,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-import requests
-
 from .base import Provider, QuotaField, UsageSnapshot
+from ._http import get_json
 
 CLAUDE_CONFIG_DIR = (
     Path(os.environ['CLAUDE_CONFIG_DIR'])
@@ -72,12 +71,30 @@ def _field_label(key: str) -> str:
     return _FIELD_LABELS.get(key, key.upper().replace('_', ' '))
 
 
+_token_cache: tuple[float, str | None] | None = None  # (mtime, token)
+
+
 def read_token() -> str | None:
+    """OAuth access token from ~/.claude/.credentials.json.
+
+    Cached by file mtime so the two reads per poll (is_available + _auth_headers)
+    parse the file only once. Behavior is identical to a fresh read.
+    """
+    global _token_cache
+    try:
+        mtime = _CREDENTIALS_FILE.stat().st_mtime
+    except OSError:
+        _token_cache = None
+        return None
+    if _token_cache is not None and _token_cache[0] == mtime:
+        return _token_cache[1]
     try:
         data = json.loads(_CREDENTIALS_FILE.read_text(encoding='utf-8'))
-        return data.get('claudeAiOauth', {}).get('accessToken') or None
+        token = data.get('claudeAiOauth', {}).get('accessToken') or None
     except Exception:
-        return None
+        token = None
+    _token_cache = (mtime, token)
+    return token
 
 
 def _auth_headers() -> dict[str, str] | None:
@@ -121,80 +138,46 @@ class ClaudeProvider(Provider):
     def is_available(self) -> bool:
         return read_token() is not None
 
+    def _rate_limited_snapshot(self, remaining: float) -> UsageSnapshot:
+        """RATE LIMITED error — reuses last good fields as stale data if we have them."""
+        mins = max(1, int(remaining / 60) + 1)
+        if self._last_fields:
+            return self._err(f'RATE LIMITED - showing old data, retry in ~{mins}m',
+                             stale=True, fields=self._last_fields)
+        return self._err(f'RATE LIMITED - retry in ~{mins}m')
+
     def fetch(self) -> UsageSnapshot:
         hdrs = _auth_headers()
         if not hdrs:
-            return UsageSnapshot(
-                provider_id=self.provider_id,
-                provider_name=self.provider_name,
-                fields=[],
-                error='NO TOKEN - run: claude auth login',
-                auth_error=True,
-            )
+            return self._err('NO TOKEN - run: claude auth login', auth_error=True)
 
         remaining = _rate_limit_remaining()
         if remaining > 0:
-            mins = max(1, int(remaining / 60) + 1)
-            if self._last_fields:
-                return UsageSnapshot(self.provider_id, self.provider_name, self._last_fields,
-                                     error=f'RATE LIMITED - showing old data, retry in ~{mins}m',
-                                     stale=True)
-            return UsageSnapshot(self.provider_id, self.provider_name, [],
-                                 error=f'RATE LIMITED - retry in ~{mins}m')
+            return self._rate_limited_snapshot(remaining)
 
-        try:
-            r = requests.get(_API_USAGE, headers=hdrs, timeout=10)
-            r.raise_for_status()
-            data = r.json()
-            _clear_rate_limit()
-        except requests.HTTPError as e:
-            code = e.response.status_code if e.response is not None else 0
-            if code == 401:
-                return UsageSnapshot(self.provider_id, self.provider_name, [],
-                                     error='TOKEN EXPIRED - refreshing...', auth_error=True)
-            if code == 429:
-                ra: float | None = None
-                if e.response is not None:
-                    try:
-                        ra = float(e.response.headers.get('Retry-After', ''))
-                    except (ValueError, TypeError):
-                        pass
-                _record_rate_limit(ra)
-                mins = max(1, int(_rate_limit_remaining() / 60) + 1)
-                if self._last_fields:
-                    return UsageSnapshot(self.provider_id, self.provider_name, self._last_fields,
-                                         error=f'RATE LIMITED - showing old data, retry in ~{mins}m',
-                                         stale=True)
-                return UsageSnapshot(self.provider_id, self.provider_name, [],
-                                     error=f'RATE LIMITED - retry in ~{mins}m')
-            if 500 <= code < 600:
-                return UsageSnapshot(self.provider_id, self.provider_name, [],
-                                     error=f'SERVER ERROR {code}')
-            return UsageSnapshot(self.provider_id, self.provider_name, [],
-                                 error=f'HTTP {code}')
-        except requests.ConnectionError:
-            return UsageSnapshot(self.provider_id, self.provider_name, [],
-                                 error='CONNECTION FAILED')
-        except Exception:
-            return UsageSnapshot(self.provider_id, self.provider_name, [],
-                                 error='UNKNOWN ERROR')
+        data, err = get_json(_API_USAGE, hdrs, timeout=10)
+        if err is not None:
+            if err.status == 401:
+                return self._err('TOKEN EXPIRED - refreshing...', auth_error=True)
+            if err.status == 429:
+                _record_rate_limit(err.retry_after)
+                return self._rate_limited_snapshot(_rate_limit_remaining())
+            if err.transport == 'connection':
+                return self._err('CONNECTION FAILED')
+            if err.transport == 'unknown':
+                return self._err('UNKNOWN ERROR')
+            if 500 <= err.status < 600:
+                return self._err(f'SERVER ERROR {err.status}')
+            return self._err(f'HTTP {err.status}')
 
+        _clear_rate_limit()
         fields, extras = _parse_response(data)
         self._last_fields = fields
-        return UsageSnapshot(
-            provider_id=self.provider_id,
-            provider_name=self.provider_name,
-            fields=fields,
-            extras=extras,
-        )
+        return self._ok(fields, extras)
 
     def fetch_profile(self) -> dict[str, Any] | None:
         hdrs = _auth_headers()
         if not hdrs:
             return None
-        try:
-            r = requests.get(_API_PROFILE, headers=hdrs, timeout=10)
-            r.raise_for_status()
-            return r.json()
-        except Exception:
-            return None
+        data, err = get_json(_API_PROFILE, hdrs, timeout=10)
+        return data if err is None else None

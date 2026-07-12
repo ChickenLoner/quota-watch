@@ -34,3 +34,12 @@ class Provider(ABC):
 
     @abstractmethod
     def is_available(self) -> bool: ...
+
+    # ── Snapshot constructors (cut per-provider boilerplate) ──────────────
+    def _ok(self, fields: list[QuotaField], extras: dict[str, Any] | None = None) -> UsageSnapshot:
+        return UsageSnapshot(self.provider_id, self.provider_name, fields, extras=extras or {})
+
+    def _err(self, message: str, *, auth_error: bool = False, stale: bool = False,
+             fields: list[QuotaField] | None = None) -> UsageSnapshot:
+        return UsageSnapshot(self.provider_id, self.provider_name, fields or [],
+                             error=message, auth_error=auth_error, stale=stale)

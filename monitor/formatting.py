@@ -9,6 +9,22 @@ _NUMBER_WORDS = {
 }
 _UNIT_SUFFIXES = {'hour': 'h', 'day': 'd'}
 
+
+def parse_iso(s: str | None) -> datetime | None:
+    """Parse an ISO8601 string (tolerating a trailing 'Z') to aware datetime, or None."""
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace('Z', '+00:00'))
+    except (ValueError, TypeError):
+        return None
+
+
+def unix_to_iso(ts: int) -> str:
+    """Unix seconds → ISO8601 UTC string."""
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+
 def field_period(field: str) -> int | None:
     """Return period in seconds for a field key, or None."""
     parts = field.split('_', 2)

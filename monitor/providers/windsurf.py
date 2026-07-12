@@ -4,10 +4,10 @@ from __future__ import annotations
 import json
 import sqlite3
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 from .base import Provider, QuotaField, UsageSnapshot
+from ..formatting import unix_to_iso
 
 _DB_KEY = 'windsurf.settings.cachedPlanInfo'
 
@@ -20,10 +20,6 @@ def _db_path() -> Path:
     else:
         base = Path(Path.home(), '.config')
     return base / 'Windsurf' / 'User' / 'globalStorage' / 'state.vscdb'
-
-
-def _unix_to_iso(ts: int) -> str:
-    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
 
 
 def _read_plan_info(db: Path) -> dict | None:
@@ -49,13 +45,11 @@ class WindsurfProvider(Provider):
     def fetch(self) -> UsageSnapshot:
         db = _db_path()
         if not db.is_file():
-            return UsageSnapshot(self.provider_id, self.provider_name, [],
-                                 error='Windsurf not found - install and launch Windsurf first')
+            return self._err('Windsurf not found - install and launch Windsurf first')
 
         plan = _read_plan_info(db)
         if plan is None:
-            return UsageSnapshot(self.provider_id, self.provider_name, [],
-                                 error='No plan data - sign in to Windsurf first')
+            return self._err('No plan data - sign in to Windsurf first')
 
         return self._parse(plan)
 
@@ -73,7 +67,7 @@ class WindsurfProvider(Provider):
                 key='one_day',
                 label='DAILY - 1D',
                 utilization=max(0.0, min(100.0, 100.0 - float(daily_rem))),
-                resets_at=_unix_to_iso(int(daily_ts)) if daily_ts else None,
+                resets_at=unix_to_iso(int(daily_ts)) if daily_ts else None,
             ))
 
         if weekly_rem is not None:
@@ -81,7 +75,7 @@ class WindsurfProvider(Provider):
                 key='seven_day',
                 label='WEEKLY - 7D',
                 utilization=max(0.0, min(100.0, 100.0 - float(weekly_rem))),
-                resets_at=_unix_to_iso(int(weekly_ts)) if weekly_ts else None,
+                resets_at=unix_to_iso(int(weekly_ts)) if weekly_ts else None,
             ))
 
         # Fallback: older message-count schema
@@ -101,9 +95,4 @@ class WindsurfProvider(Provider):
         if plan.get('planName'):
             extras['plan_name'] = plan['planName']
 
-        return UsageSnapshot(
-            provider_id=self.provider_id,
-            provider_name=self.provider_name,
-            fields=fields,
-            extras=extras,
-        )
+        return self._ok(fields, extras)

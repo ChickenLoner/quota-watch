@@ -3,13 +3,12 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import requests
-
 from .base import Provider, QuotaField, UsageSnapshot
+from ..formatting import unix_to_iso
+from ._http import get_json
 
 _CODEX_HOME = (
     Path(os.environ['CODEX_HOME'])
@@ -40,10 +39,6 @@ def _seconds_to_field(seconds: int, fallback: str) -> tuple[str, str]:
         return (fallback, f'SESSION - {h}H')
     d = max(1, seconds // 86400)
     return (fallback, f'PERIOD - {d}D')
-
-
-def _unix_to_iso(ts: int) -> str:
-    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
 
 
 def _read_credentials() -> dict[str, Any] | None:
@@ -80,13 +75,11 @@ class CodexProvider(Provider):
     def fetch(self) -> UsageSnapshot:
         creds = _read_credentials()
         if not creds:
-            return UsageSnapshot(self.provider_id, self.provider_name, [],
-                                 error='NO AUTH - run: codex (to log in)', auth_error=True)
+            return self._err('NO AUTH - run: codex (to log in)', auth_error=True)
 
         token = _extract_token(creds)
         if not token:
-            return UsageSnapshot(self.provider_id, self.provider_name, [],
-                                 error='NO TOKEN in ~/.codex/auth.json', auth_error=True)
+            return self._err('NO TOKEN in ~/.codex/auth.json', auth_error=True)
 
         account_id = _extract_account_id(creds)
         headers = {
@@ -97,26 +90,22 @@ class CodexProvider(Provider):
         if account_id:
             headers['ChatGPT-Account-Id'] = account_id
 
-        try:
-            r = requests.get(_USAGE_URL, headers=headers, timeout=15)
-            r.raise_for_status()
-            data = r.json()
-        except requests.HTTPError as e:
-            code = e.response.status_code if e.response is not None else 0
-            if code in (401, 403):
-                return UsageSnapshot(self.provider_id, self.provider_name, [],
-                                     error='TOKEN EXPIRED - run: codex (to re-login)', auth_error=True)
-            if 500 <= code < 600:
-                return UsageSnapshot(self.provider_id, self.provider_name, [],
-                                     error=f'SERVER ERROR {code}')
-            return UsageSnapshot(self.provider_id, self.provider_name, [],
-                                 error=f'HTTP {code}')
-        except requests.ConnectionError:
-            return UsageSnapshot(self.provider_id, self.provider_name, [],
-                                 error='CONNECTION FAILED')
-        except Exception:
-            return UsageSnapshot(self.provider_id, self.provider_name, [],
-                                 error='UNKNOWN ERROR')
+        data, err = get_json(_USAGE_URL, headers, timeout=15)
+        if err is not None:
+            if err.status in (401, 403):
+                return self._err('TOKEN EXPIRED - run: codex (to re-login)', auth_error=True)
+            if err.status == 429:
+                if err.retry_after and err.retry_after > 0:
+                    mins = max(1, int(err.retry_after / 60) + 1)
+                    return self._err(f'RATE LIMITED - retry in ~{mins}m')
+                return self._err('RATE LIMITED - retry shortly')
+            if err.transport == 'connection':
+                return self._err('CONNECTION FAILED')
+            if err.transport == 'unknown':
+                return self._err('UNKNOWN ERROR')
+            if 500 <= err.status < 600:
+                return self._err(f'SERVER ERROR {err.status}')
+            return self._err(f'HTTP {err.status}')
 
         return self._parse(data)
 
@@ -133,7 +122,7 @@ class CodexProvider(Provider):
                 key=key,
                 label=label,
                 utilization=float(primary['used_percent']),
-                resets_at=_unix_to_iso(reset_ts) if reset_ts else None,
+                resets_at=unix_to_iso(reset_ts) if reset_ts else None,
             ))
 
         secondary = rate_limit.get('secondary_window')
@@ -145,7 +134,7 @@ class CodexProvider(Provider):
                 key=key,
                 label=label,
                 utilization=float(secondary['used_percent']),
-                resets_at=_unix_to_iso(reset_ts) if reset_ts else None,
+                resets_at=unix_to_iso(reset_ts) if reset_ts else None,
             ))
 
         # Additional model-specific limits (optional, append after primary/secondary)
@@ -163,7 +152,7 @@ class CodexProvider(Provider):
                 key=key,
                 label=f'{name.upper()} - {label.split(" - ")[-1]}' if ' - ' in label else name.upper(),
                 utilization=float(pw['used_percent']),
-                resets_at=_unix_to_iso(reset_ts) if reset_ts else None,
+                resets_at=unix_to_iso(reset_ts) if reset_ts else None,
             ))
 
         extras: dict[str, Any] = {}
@@ -175,9 +164,4 @@ class CodexProvider(Provider):
         if credits:
             extras['credits'] = credits
 
-        return UsageSnapshot(
-            provider_id=self.provider_id,
-            provider_name=self.provider_name,
-            fields=fields,
-            extras=extras,
-        )
+        return self._ok(fields, extras)

@@ -38,7 +38,13 @@ Current providers: `ClaudeProvider`, `CodexProvider`, `WindsurfProvider`, `Antig
 
 ### Alert keys
 Composite format: `"{provider_id}:{field_key}"` e.g. `"claude:five_hour"`.
-Thresholds live in `formatting.py:_THRESHOLDS` (shared by `app.py` notifications and `popup.py` bar color via `sev_for()`).
+
+### Thresholds (two independent systems — keep in mind)
+- **Notifications**: `app.py:_THRESHOLDS` + `_thresholds_for()` — per-field crossing thresholds (`five_hour [50,80,95]`, `seven_day [95]`); fire once per upward crossing, deduped in `_notified_thresholds`, re-armed on reset.
+- **Bar color**: `popup.py:_bar_entry` — absolute `sev` from raw utilization (`crit ≥90`, `warn ≥50`, else `ok`). Independent of the notification thresholds by design.
+
+### Display metric (USED / LEFT)
+Global toggle in `popup.js` (`state.metricMode`, header button + `U` hotkey). Display-only: `utilization` stays canonical "% used"; LEFT shows `100 - used` with battery-style fill. Severity/color is always risk-based and never inverts.
 
 ### Popup data flow
 `app.py:_write_status_cache()` → `popup.py:_build_payload()` → `popup.js:init()/refreshDone()`

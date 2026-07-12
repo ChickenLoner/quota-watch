@@ -4,12 +4,11 @@ from __future__ import annotations
 import ctypes
 import ctypes.wintypes
 import json
-import subprocess
 import sys
 import threading
 import time
 import traceback
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -29,7 +28,7 @@ from .providers.claude import ClaudeProvider, read_token
 from .providers.codex import CodexProvider
 from .providers.windsurf import WindsurfProvider
 from .autostart import is_enabled as autostart_is_enabled, set_enabled as autostart_set, sync_path as autostart_sync
-from .formatting import countdown_short, field_period
+from .formatting import countdown_short, field_period, parse_iso
 from .tray import app_icon, taskbar_is_light, watch_theme
 
 POLL_INTERVAL      = 180
@@ -55,6 +54,17 @@ def _thresholds_for(key: str) -> list[float]:
     return []
 
 
+def _field_dict(f: Any) -> dict[str, Any]:
+    """Compact field record for the status cache (statusline consumers)."""
+    resets = f.resets_at or ''
+    return {
+        'key':       f.key,
+        'pct':       round(f.utilization),
+        'resets_at': resets,
+        'countdown': countdown_short(resets),
+    }
+
+
 def _at_limit_skip(snap: 'UsageSnapshot') -> bool:
     """True when primary field is at 100% and reset hasn't passed yet (+5 min grace)."""
     if not snap.fields:
@@ -62,11 +72,10 @@ def _at_limit_skip(snap: 'UsageSnapshot') -> bool:
     f = snap.fields[0]
     if f.utilization < 100 or not f.resets_at:
         return False
-    try:
-        reset = datetime.fromisoformat(f.resets_at.replace('Z', '+00:00'))
-        return datetime.now(timezone.utc) < reset + timedelta(minutes=5)
-    except Exception:
+    reset = parse_iso(f.resets_at)
+    if reset is None:
         return False
+    return datetime.now(timezone.utc) < reset + timedelta(minutes=5)
 
 
 @dataclass
@@ -89,7 +98,8 @@ class App:
         self._last_error:         str | None = None
         self._profile_token:      str | None = None
 
-        self._lock             = threading.Lock()
+        self._lock             = threading.Lock()   # guards shared state; held only briefly
+        self._poll_lock        = threading.Lock()   # serializes polls; never held across I/O
         self._popup_lock       = threading.Lock()
         self._popup_open       = False
         self._popup_closed_at  = 0.0
@@ -181,17 +191,12 @@ class App:
         with self._lock:
             for snap in self._snapshots.values():
                 for f in snap.fields:
-                    if not f.resets_at:
+                    reset = parse_iso(f.resets_at)
+                    if reset is None:
                         continue
-                    try:
-                        ts = datetime.fromisoformat(
-                            f.resets_at.replace('Z', '+00:00')
-                        ).timestamp()
-                        if now < ts < cutoff:
-                            if earliest is None or ts < earliest:
-                                earliest = ts
-                    except Exception:
-                        pass
+                    ts = reset.timestamp()
+                    if now < ts < cutoff and (earliest is None or ts < earliest):
+                        earliest = ts
         return earliest
 
     def _poll_loop(self) -> None:
@@ -215,63 +220,68 @@ class App:
             self._force_poll.clear()
 
     def _update(self) -> None:
-        if not self._lock.acquire(blocking=False):
+        # Serialize polls without blocking readers. Provider fetches (network +
+        # subprocess) run with NO lock held, so the popup's cache_snapshot never
+        # stalls behind a poll; self._lock is taken only for brief state access.
+        if not self._poll_lock.acquire(blocking=False):
             return
         try:
+            with self._lock:
+                existing_all = dict(self._snapshots)
+
             new_snapshots: dict[str, UsageSnapshot] = {}
             skipped: dict[str, UsageSnapshot] = {}  # at-limit providers; use cached data
             for provider in self._providers:
                 if not provider.is_available():
                     continue
-                existing = self._snapshots.get(provider.provider_id)
+                existing = existing_all.get(provider.provider_id)
                 if existing and not existing.error and _at_limit_skip(existing):
                     skipped[provider.provider_id] = existing
                 else:
                     new_snapshots[provider.provider_id] = provider.fetch()
+
+            # Separate successes from failures; merge skipped into ok
+            ok      = {pid: s for pid, s in new_snapshots.items() if not s.error}
+            ok.update(skipped)
+            failed  = {pid: s for pid, s in new_snapshots.items() if s.error}
+
+            if not ok and failed:
+                errors = ', '.join(f'{pid}: {s.error}' for pid, s in failed.items())
+                self._last_error  = errors
+                self._error_count += 1
+                self._render_tray(error=True)
+                return
+
+            with self._lock:
+                self._snapshots.update(new_snapshots)
+                self._last_success_time = time.time()
+                self._last_error  = None
+                self._error_count = 0
+
+            # Build composite pct_map: "{provider_id}:{field_key}" -> utilization
+            pct_map: dict[str, float] = {}
+            for pid, snap in ok.items():
+                for f in snap.fields:
+                    pct_map[f'{pid}:{f.key}'] = f.utilization
+
+            self._check_reset_alerts(pct_map)
+            self._check_threshold_alerts(pct_map)
+
+            # Adaptive fast-poll: trigger when Claude's session field is rising
+            primary_key  = 'claude:five_hour'
+            primary_pct  = pct_map.get(primary_key, 0)
+            primary_prev = self._prev_utilization.get(primary_key)
+            if primary_prev is not None and primary_pct > primary_prev:
+                self._fast_polls = 3
+            elif self._fast_polls > 0:
+                self._fast_polls -= 1
+
+            self._prev_utilization  = pct_map
+            self._first_update_done = True
+            self._render_tray(error=False)
+            self._write_status_cache(ok)
         finally:
-            self._lock.release()
-
-        # Separate successes from failures; merge skipped into ok
-        ok      = {pid: s for pid, s in new_snapshots.items() if not s.error}
-        ok.update(skipped)
-        failed  = {pid: s for pid, s in new_snapshots.items() if s.error}
-
-        if not ok and failed:
-            errors = ', '.join(f'{pid}: {s.error}' for pid, s in failed.items())
-            self._last_error  = errors
-            self._error_count += 1
-            self._render_tray(error=True)
-            return
-
-        with self._lock:
-            self._snapshots.update(new_snapshots)
-            self._last_success_time = time.time()
-            self._last_error  = None
-            self._error_count = 0
-
-        # Build composite pct_map: "{provider_id}:{field_key}" -> utilization
-        pct_map: dict[str, float] = {}
-        for pid, snap in ok.items():
-            for f in snap.fields:
-                pct_map[f'{pid}:{f.key}'] = f.utilization
-
-        self._check_reset_alerts(pct_map)
-        self._check_threshold_alerts(pct_map)
-
-        # Adaptive fast-poll: trigger when Claude's session field is rising
-        claude_snap  = ok.get('claude')
-        primary_key  = 'claude:five_hour'
-        primary_pct  = pct_map.get(primary_key, 0)
-        primary_prev = self._prev_utilization.get(primary_key)
-        if primary_prev is not None and primary_pct > primary_prev:
-            self._fast_polls = 3
-        elif self._fast_polls > 0:
-            self._fast_polls -= 1
-
-        self._prev_utilization  = pct_map
-        self._first_update_done = True
-        self._render_tray(error=False)
-        self._write_status_cache(ok)
+            self._poll_lock.release()
 
     # ── Alerts ───────────────────────────────────────────────────────────────
 
@@ -344,28 +354,13 @@ class App:
         payload = {
             'updated': int(time.time()),
             'providers': {
-                pid: {
-                    'fields': [
-                        {
-                            'key':       f.key,
-                            'pct':       round(f.utilization),
-                            'resets_at': f.resets_at or '',
-                            'countdown': countdown_short(f.resets_at or ''),
-                        }
-                        for f in snap.fields
-                    ],
-                }
+                pid: {'fields': [_field_dict(f) for f in snap.fields]}
                 for pid, snap in ok.items()
             },
             # Keep legacy 'fields' key for existing statusline scripts (Claude primary only)
             'fields': [
-                {
-                    'key':       f.key,
-                    'pct':       round(f.utilization),
-                    'resets_at': f.resets_at or '',
-                    'countdown': countdown_short(f.resets_at or ''),
-                }
-                for f in (ok.get('claude', UsageSnapshot('', '', [])).fields)
+                _field_dict(f)
+                for f in ok.get('claude', UsageSnapshot('', '', [])).fields
             ],
         }
         try:
