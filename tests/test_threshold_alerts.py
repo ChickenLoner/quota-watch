@@ -39,12 +39,25 @@ def test_under_pace_still_warns_near_limit():
     assert any('96%' in m or '95' in m for m in fired), f'expected a near-limit alert, got {fired}'
 
 
-def test_all_thresholds_fire_on_burst():
+def test_both_bands_fire_on_burst():
     app, fired = _new_app()
-    _poll(app, 55, 10)
-    _poll(app, 85, 15)
-    _poll(app, 97, 20)
-    assert len(fired) == 3, f'expected 3 alerts (50/80/95), got {len(fired)}: {fired}'
+    _poll(app, 55, 10)   # crosses warn (50)
+    _poll(app, 92, 20)   # crosses crit (90)
+    assert len(fired) == 2, f'expected 2 alerts (50/90), got {len(fired)}: {fired}'
+
+
+def test_seven_day_warns_at_band():
+    """Unified bands: seven_day alerts at 50 (was 95-only before centralization)."""
+    app, fired = _new_app()
+    app.process({'claude:seven_day': 55})
+    assert fired, f'seven_day should alert at 55%, got {fired}'
+
+
+def test_unconfigured_field_uses_default_band():
+    """A field with no explicit band still alerts via the default (50/90)."""
+    app, fired = _new_app()
+    app.process({'codex:one_day': 60})   # one_day not in _BANDS → default
+    assert fired, f'one_day should alert at 60% via default band, got {fired}'
 
 
 def test_no_duplicate_alert_for_same_threshold():

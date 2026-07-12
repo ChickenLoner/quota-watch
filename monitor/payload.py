@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from . import __version__
+from .severity import sev_for
 
 if TYPE_CHECKING:
     from .app import App
@@ -53,7 +54,7 @@ _INSTALL_TTL = 300  # seconds
 def _bar_entry(f: Any) -> dict[str, Any]:
     pct    = f.utilization
     resets = f.resets_at or ''
-    sev    = 'crit' if pct >= 90 else ('warn' if pct >= 50 else 'ok')
+    sev    = sev_for(f.key, pct)
     return {
         'key':        f.key,
         'label':      f.label,

@@ -39,9 +39,12 @@ Current providers: `ClaudeProvider`, `CodexProvider`, `WindsurfProvider`, `Antig
 ### Alert keys
 Composite format: `"{provider_id}:{field_key}"` e.g. `"claude:five_hour"`.
 
-### Thresholds (two independent systems — keep in mind)
-- **Notifications**: `app.py:_THRESHOLDS` + `_thresholds_for()` — per-field crossing thresholds (`five_hour [50,80,95]`, `seven_day [95]`); fire once per upward crossing, deduped in `_notified_thresholds`, re-armed on reset.
-- **Bar color**: `popup.py:_bar_entry` — absolute `sev` from raw utilization (`crit ≥90`, `warn ≥50`, else `ok`). Independent of the notification thresholds by design.
+### Thresholds — one source of truth (`severity.py`)
+Per-field `(warn, crit)` bands in `severity.py:_BANDS` (default `(50, 90)`, with base-period fallback) drive **both**:
+- **Bar color**: `payload.py:_bar_entry` → `sev_for(key, pct)` → `ok`/`warn`/`crit`.
+- **Notifications**: `alerts.py:AlertManager` → `crossings(key)` (= `[warn, crit]`); fires once per upward crossing, deduped in `_notified`, re-armed on reset (`AlertManager.process`).
+
+Because both read the same bands, a red bar always means the crit alert fired — they can't diverge. Tune a field by adding it to `_BANDS`.
 
 ### Display metric (USED / LEFT)
 Global toggle in `popup.js` (`state.metricMode`, header button + `U` hotkey). Display-only: `utilization` stays canonical "% used"; LEFT shows `100 - used` with battery-style fill. Severity/color is always risk-based and never inverts.

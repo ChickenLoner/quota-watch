@@ -9,24 +9,7 @@ from __future__ import annotations
 from typing import Callable
 
 from .formatting import field_period
-
-# Per-field upward-crossing thresholds for low-quota notifications. Falls back
-# to the field's base period (e.g. 'seven_day_opus' → 'seven_day').
-_THRESHOLDS: dict[str, list[float]] = {
-    'five_hour': [50, 80, 95],
-    'seven_day': [95],
-}
-
-
-def _thresholds_for(key: str) -> list[float]:
-    if key in _THRESHOLDS:
-        return _THRESHOLDS[key]
-    parts = key.split('_', 2)
-    if len(parts) >= 2:
-        base = f'{parts[0]}_{parts[1]}'
-        if base in _THRESHOLDS:
-            return _THRESHOLDS[base]
-    return []
+from .severity import crossings
 
 
 class AlertManager:
@@ -83,7 +66,7 @@ class AlertManager:
         """
         for composite_key, pct in pct_map.items():
             field_key = composite_key.split(':', 1)[1] if ':' in composite_key else composite_key
-            thresholds = _thresholds_for(field_key)
+            thresholds = crossings(field_key)
             if not thresholds:
                 continue
 
