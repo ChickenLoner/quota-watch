@@ -28,15 +28,16 @@ function _loadStoredState() {
 }
 function _saveState() {
   try {
-    const { mode, theme, compact } = state;
-    localStorage.setItem(_STORAGE_KEY, JSON.stringify({ mode, theme, compact }));
+    const { mode, theme, compact, metricMode } = state;
+    localStorage.setItem(_STORAGE_KEY, JSON.stringify({ mode, theme, compact, metricMode }));
   } catch (_) {}
 }
 
 const _stored = _loadStoredState();
 const state = {
-  mode:     _stored.mode    || 'focus',
-  theme:    _stored.theme   || 'dark',
+  mode:       _stored.mode    || 'focus',
+  theme:      _stored.theme   || 'dark',
+  metricMode: _stored.metricMode || 'used',   // 'used' | 'left' — display framing
   themeRot: 0,
   compact:  _stored.compact != null ? _stored.compact : false,
   active:   null,
@@ -45,12 +46,24 @@ const state = {
   data:     null,
 };
 
-const RANK = { crit: 0, err: 1, warn: 2, ok: 3 };
+/* crit < warn < ok keeps _worstBar picking the worst *bar* (bars are never
+   'err'); 'err' (no data to view) ranks last so no-data providers sink to the
+   bottom of the focus switcher / arrow-key order. */
+const RANK = { crit: 0, warn: 1, ok: 2, err: 3 };
 const SEV_LABEL = { ok: 'NOMINAL', warn: 'WARNING', crit: 'CRITICAL', err: 'UNAVAILABLE' };
 
 /* helpers --------------------------------------------------------------- */
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/* Global USED/LEFT view. Display-only: `utilization` stays the canonical
+   "% used"; LEFT shows the remaining complement (100 - used). Color/severity
+   NEVER flips — it tracks risk (high used = low left = bad) in both modes, so
+   a 6%-left bar is red exactly like the 94%-used bar it represents. */
+function _metricView(pct) {
+  const left = state.metricMode === 'left';
+  return { pct: left ? 100 - pct : pct, word: left ? 'LEFT' : 'USED' };
+}
 
 function _fmtReset(iso) {
   if (!iso) return null;
@@ -73,6 +86,32 @@ function _fmtReset(iso) {
     if (h > 0) return `in ${h}h ${m}m (${time})`;
     return `in ${m}m (${time})`;
   } catch (_) { return null; }
+}
+
+/* Compact countdown for cramped grid rows: "3d14h", "4h22m", "45m", or ''. */
+function _fmtResetShort(iso) {
+  if (!iso) return '';
+  try {
+    const diff = new Date(iso).getTime() - Date.now();
+    if (diff <= 0) return '';
+    const total_min = Math.floor(diff / 60000);
+    if (total_min === 0) return '';
+    const d = Math.floor(total_min / 1440);
+    const h = Math.floor((total_min % 1440) / 60);
+    const m = total_min % 60;
+    if (d > 0) return `${d}d${h}h`;
+    if (h > 0) return `${h}h${m.toString().padStart(2, '0')}m`;
+    return `${m}m`;
+  } catch (_) { return ''; }
+}
+
+/* Small reset countdown for compact grid rows. Empty when no/expired reset.
+   The countdown lives in its own span so the 30s ticker can refresh it in
+   place while the ↺ glyph stays put. */
+function _resetChip(iso) {
+  const s = _fmtResetShort(iso);
+  if (!s) return '';
+  return `<span class="qw-row-reset">&#8635; <span data-resets-short="${esc(iso)}">${esc(s)}</span></span>`;
 }
 
 function _fmtFooter(status) {
@@ -110,7 +149,7 @@ function _sortedProviders() {
 
 /* Grid order: healthiest providers first, so the user sees at a glance
    which one is safe to switch to; worst-off providers sink to the bottom. */
-const _HEALTH_RANK = { ok: 0, warn: 1, err: 2, crit: 3 };
+const _HEALTH_RANK = { ok: 0, warn: 1, crit: 2, err: 3 };
 function _healthSortedProviders() {
   return state.data.providers.slice().sort((a, b) => {
     const ra = _HEALTH_RANK[a.statusSev], rb = _HEALTH_RANK[b.statusSev];
@@ -127,6 +166,7 @@ function _planBadge(plan, sm) {
 }
 
 function _bigBar(b) {
+  const v = _metricView(b.pct);
   const resetStr = _fmtReset(b.resets_at);
   const resetHtml = resetStr
     ? `<div class="qw-reset"><span>⏱</span><span class="lbl">resets</span><span class="val" data-resets="${esc(b.resets_at)}">${esc(resetStr)}</span></div>`
@@ -135,23 +175,24 @@ function _bigBar(b) {
     <div class="qw-bar-head">
       <div>
         <div class="qw-bar-label">${esc(b.label)}</div>
-        <div class="qw-bar-pct">${Math.round(b.pct)}<small>%</small></div>
+        <div class="qw-bar-pct">${Math.round(v.pct)}<small>% ${v.word}</small></div>
       </div>
       <span class="qw-badge sev-${b.sev}">${SEV_LABEL[b.sev] || ''}</span>
     </div>
-    <div class="qw-track"><div class="qw-fill" style="width:${Math.min(100, b.pct)}%"></div></div>
+    <div class="qw-track"><div class="qw-fill" style="width:${Math.min(100, v.pct)}%"></div></div>
     ${resetHtml}
   </div>`;
 }
 
 function _cardBar(b) {
+  const v = _metricView(b.pct);
   const resetStr = _fmtReset(b.resets_at);
   const resetHtml = resetStr
     ? `<div class="qw-cb-reset">↺ <span data-resets="${esc(b.resets_at)}">${esc(resetStr)}</span></div>`
     : '';
   return `<div class="qw-cb sev-${b.sev}">
-    <div class="qw-cb-head"><span class="qw-cb-label">${esc(b.label)}</span><span class="qw-cb-pct">${Math.round(b.pct)}%</span></div>
-    <div class="qw-cb-track"><div class="qw-cb-fill" style="width:${Math.min(100, b.pct)}%"></div></div>
+    <div class="qw-cb-head"><span class="qw-cb-label">${esc(b.label)}</span><span class="qw-cb-pct">${Math.round(v.pct)}%<span class="qw-cb-metric"> ${v.word}</span></span></div>
+    <div class="qw-cb-track"><div class="qw-cb-fill" style="width:${Math.min(100, v.pct)}%"></div></div>
     ${resetHtml}
   </div>`;
 }
@@ -160,12 +201,9 @@ function _errorBlock(p) {
   const icon = p.authStatus === 'auth_error' ? '⚠' : '⚡';
   const msg  = p.errorText || (p.authStatus === 'auth_error' ? 'Authentication required.' : 'Unavailable.');
   const hint = p.reAuthHint ? `<div class="hint">${esc(p.reAuthHint)}</div>` : '';
-  const launchBtn = (p.id === 'antigravity' && p.errorText === 'Run agy to see quota' && p.canLaunchAgy)
-    ? `<button class="qw-launch-btn" data-act="launch_agy">&#9654; Launch agy</button>`
-    : '';
   return `<div class="qw-error">
     <span class="ico">${icon}</span>
-    <div><div class="msg">${esc(msg)}</div>${hint}${launchBtn}</div>
+    <div><div class="msg">${esc(msg)}</div>${hint}</div>
   </div>`;
 }
 
@@ -213,6 +251,7 @@ function _header(grid) {
   return `<div class="qw-header">
     <div class="qw-brand"><span class="qw-live"></span><span class="name">QuotaWatch</span>${meta}</div>
     <div class="qw-actions">
+      <button class="qw-mtoggle is-${state.metricMode}" data-act="metric" title="Show used / left (U)">${state.metricMode === 'left' ? 'LEFT' : 'USED'}</button>
       <button class="qw-iconbtn qw-refresh${state.syncing ? ' is-syncing' : ''}" data-act="sync" title="Refresh (R)">
         <span class="ico">${ICON.refresh}</span></button>
       <button class="qw-iconbtn qw-theme is-${state.theme}" data-act="theme" title="Toggle theme (T)">
@@ -240,12 +279,12 @@ function _renderFocus() {
     if (!w) {
       pctHtml = `<span class="pct sev-err" style="color:var(--c)">—</span>`;
     } else if (p.bars.length === 1) {
-      pctHtml = `<span class="pct sev-${w.sev}" style="color:var(--c)">${Math.round(w.pct)}%</span>`;
+      pctHtml = `<span class="pct sev-${w.sev}" style="color:var(--c)">${Math.round(_metricView(w.pct).pct)}%</span>`;
     } else {
       pctHtml = `<div class="qw-menu-multi">${p.bars.map(b =>
         `<div class="qw-menu-multi-row sev-${b.sev}">
           <span class="lbl">${esc(b.label)}</span>
-          <span class="pct" style="color:var(--c)">${Math.round(b.pct)}%</span>
+          <span class="pct" style="color:var(--c)">${Math.round(_metricView(b.pct).pct)}%</span>
         </div>`).join('')}</div>`;
     }
     return `<button class="qw-menu-item${p.id === active.id ? ' active' : ''}" data-pick="${esc(p.id)}">
@@ -322,16 +361,19 @@ function _renderGrid() {
         miniHtml = `<div class="mini sev-err"><div style="width:0%"></div></div>
                     <span class="pct sev-err" style="color:var(--c)">—</span>`;
       } else if (p.bars.length === 1) {
-        const w = p.bars[0];
-        miniHtml = `<div class="mini sev-${w.sev}"><div style="width:${Math.min(100, w.pct)}%"></div></div>
-                    <span class="pct sev-${w.sev}" style="color:var(--c)">${Math.round(w.pct)}%</span>`;
+        const w = p.bars[0], vw = _metricView(w.pct);
+        miniHtml = `<div class="mini sev-${w.sev}"><div style="width:${Math.min(100, vw.pct)}%"></div></div>
+                    <span class="pct sev-${w.sev}" style="color:var(--c)">${Math.round(vw.pct)}%</span>
+                    ${_resetChip(w.resets_at)}`;
       } else {
-        miniHtml = `<div class="qw-row-multi">${p.bars.map(b =>
-          `<div class="qw-row-mini-item sev-${b.sev}">
+        miniHtml = `<div class="qw-row-multi">${p.bars.map(b => {
+          const vb = _metricView(b.pct);
+          return `<div class="qw-row-mini-item sev-${b.sev}">
             <span class="mini-lbl">${esc(b.label)}</span>
-            <div class="mini"><div style="width:${Math.min(100, b.pct)}%"></div></div>
-            <span class="pct">${Math.round(b.pct)}%</span>
-          </div>`).join('')}</div>`;
+            <div class="mini"><div style="width:${Math.min(100, vb.pct)}%"></div></div>
+            <span class="pct">${Math.round(vb.pct)}%</span>
+            ${_resetChip(b.resets_at)}
+          </div>`; }).join('')}</div>`;
       }
       return `<div class="qw-row sev-${sev}" style="--i:${i}">
         ${_dot(p.id, p.dot)}
@@ -466,15 +508,10 @@ shell.addEventListener('click', (e) => {
     case 'menu':      state.menuOpen = !state.menuOpen; render(); break;
     case 'density':   state.compact = !state.compact; _saveState(); _animatedRender(); break;
     case 'theme':     state.theme = state.theme === 'dark' ? 'light' : 'dark'; state.themeRot += 180; _saveState(); render(); break;
+    case 'metric':    state.metricMode = state.metricMode === 'left' ? 'used' : 'left'; _saveState(); render(); break;
     case 'sync':       _doSync(); break;
     case 'close':      if (typeof pywebview !== 'undefined') pywebview.api.close(); break;
     case 'changelog':  if (typeof pywebview !== 'undefined') pywebview.api.open_url(act.dataset.url || ''); break;
-    case 'launch_agy':
-      if (typeof pywebview !== 'undefined') {
-        pywebview.api.launch_agy();
-        setTimeout(_doSync, 8000);
-      }
-      break;
   }
 });
 
@@ -495,6 +532,7 @@ document.addEventListener('keydown', (e) => {
      (e.g. Thai Kedmanee maps physical R/T/C to พ/ะ/แ), so e.key checks
      silently no-op whenever a non-Latin layout is active. */
   if (e.code === 'KeyR') { _doSync(); e.preventDefault(); return; }
+  if (e.code === 'KeyU') { state.metricMode = state.metricMode === 'left' ? 'used' : 'left'; _saveState(); render(); e.preventDefault(); return; }
   if (e.code === 'KeyC') { state.compact = !state.compact; _saveState(); _animatedRender(); e.preventDefault(); return; }
   if (e.code === 'KeyT') {
     state.theme = state.theme === 'dark' ? 'light' : 'dark';
@@ -548,6 +586,9 @@ setInterval(() => {
     const str = _fmtReset(el.dataset.resets);
     el.textContent = str || '';
   });
+  document.querySelectorAll('[data-resets-short]').forEach(el => {
+    el.textContent = _fmtResetShort(el.dataset.resetsShort);
+  });
 }, 30000);
 
 /* footer status ticker every 5s (no full re-render) --------------------- */
@@ -570,7 +611,6 @@ function normalize(payload) {
     p.errorText  = p.errorText  || null;
     p.reAuthHint = p.reAuthHint || null;
     p.stale        = p.stale        || false;
-    p.canLaunchAgy = p.canLaunchAgy || false;
   });
   return payload;
 }

@@ -278,7 +278,6 @@ def _provider_entry(pid: str, s: Any, claude_profile: dict[str, Any] | None) -> 
         entry['installs'] = _codex_installs()
     elif pid == 'antigravity':
         entry['installs'] = _agy_installs()
-        entry['canLaunchAgy'] = _find_agy_path() is not None
     return entry
 
 
@@ -361,15 +360,6 @@ class _PopupApi:
     def report_height(self, height: int) -> None:
         """Backward-compat shim — delegates to report_size with last known width."""
         self.report_size(self._popup._last_w, height)
-
-    def launch_agy(self) -> None:
-        """Launch agy as a detached background process (no-op if not found)."""
-        agy_path = _find_agy_path()
-        if agy_path:
-            subprocess.Popen(
-                [agy_path],
-                creationflags=subprocess.CREATE_NEW_CONSOLE,
-            )
 
 
 class UsagePopup:
