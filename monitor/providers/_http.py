@@ -10,6 +10,10 @@ from typing import Any
 
 import requests
 
+# One pooled session across all polls — keep-alive reuses TCP/TLS connections
+# instead of a fresh handshake on every provider fetch.
+_session = requests.Session()
+
 
 @dataclass
 class HttpError:
@@ -32,7 +36,7 @@ def _retry_after(resp: requests.Response | None) -> float | None:
 def get_json(url: str, headers: dict[str, str], timeout: float = 10) -> tuple[dict[str, Any] | None, HttpError | None]:
     """GET `url` and parse JSON. Returns (data, None) on success, (None, HttpError) on failure."""
     try:
-        r = requests.get(url, headers=headers, timeout=timeout)
+        r = _session.get(url, headers=headers, timeout=timeout)
         r.raise_for_status()
         return r.json(), None
     except requests.HTTPError as e:

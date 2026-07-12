@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -229,16 +230,33 @@ class App:
             with self._lock:
                 existing_all = dict(self._snapshots)
 
-            new_snapshots: dict[str, UsageSnapshot] = {}
+            # Decide what to fetch (cheap availability + at-limit checks stay serial),
+            # then fetch the live providers concurrently — poll wall-time becomes the
+            # slowest single provider instead of the sum. Fetches are lock-free and
+            # each provider owns its own state, so this is safe.
+            available_ids: set[str] = set()
+            to_fetch: list = []
             skipped: dict[str, UsageSnapshot] = {}  # at-limit providers; use cached data
             for provider in self._providers:
                 if not provider.is_available():
                     continue
+                available_ids.add(provider.provider_id)
                 existing = existing_all.get(provider.provider_id)
                 if existing and not existing.error and _at_limit_skip(existing):
                     skipped[provider.provider_id] = existing
                 else:
-                    new_snapshots[provider.provider_id] = provider.fetch()
+                    to_fetch.append(provider)
+
+            new_snapshots: dict[str, UsageSnapshot] = {}
+            if to_fetch:
+                with ThreadPoolExecutor(max_workers=len(to_fetch)) as ex:
+                    futures = {ex.submit(p.fetch): p for p in to_fetch}
+                    for fut in as_completed(futures):
+                        p = futures[fut]
+                        try:
+                            new_snapshots[p.provider_id] = fut.result()
+                        except Exception:
+                            new_snapshots[p.provider_id] = p._err('UNKNOWN ERROR')
 
             # Separate successes from failures; merge skipped into ok
             ok      = {pid: s for pid, s in new_snapshots.items() if not s.error}
@@ -254,6 +272,11 @@ class App:
 
             with self._lock:
                 self._snapshots.update(new_snapshots)
+                # Drop providers that are no longer available so the popup doesn't
+                # keep showing their last snapshot as if it were still live.
+                for pid in list(self._snapshots):
+                    if pid not in available_ids:
+                        self._snapshots.pop(pid, None)
                 self._last_success_time = time.time()
                 self._last_error  = None
                 self._error_count = 0
