@@ -29,6 +29,7 @@ _FIELD_LABELS: dict[str, str] = {
     'seven_day_cowork':     'COWORK - 7D',
     'seven_day_oauth_apps': 'OAUTH APPS - 7D',
     'tangelo':              'TANGELO',
+    'nimbus_quill':         'FABLE - 7D',
     'iguana_necktie':       'IGUANA NECKTIE',
     'omelette_promotional': 'DESIGN PROMO',
 }
@@ -116,11 +117,18 @@ def _parse_response(data: dict[str, Any]) -> tuple[list[QuotaField], dict[str, A
         if key == 'extra_usage':
             continue
         if isinstance(value, dict) and value.get('utilization') is not None:
+            utilization = value.get('utilization', 0) or 0
+            resets_at = value.get('resets_at') or None
+            if not resets_at and utilization <= 0:
+                # Code-named quota Anthropic announced but hasn't activated for
+                # this account yet (e.g. "nimbus_quill") — no reset window, never
+                # used. Skip until it goes live and starts sending a resets_at.
+                continue
             fields.append(QuotaField(
                 key=key,
                 label=_field_label(key),
-                utilization=value.get('utilization', 0) or 0,
-                resets_at=value.get('resets_at') or None,
+                utilization=utilization,
+                resets_at=resets_at,
             ))
     extras: dict[str, Any] = {}
     if 'extra_usage' in data:
