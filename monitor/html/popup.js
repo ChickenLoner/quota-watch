@@ -219,6 +219,17 @@ function _extraBlock(extra) {
   </div>`;
 }
 
+function _resetCreditsBlock(count) {
+  if (!count) return '';
+  const noun = count === 1 ? 'credit' : 'credits';
+  return `<div class="qw-extra">
+    <div class="qw-extra-head">
+      <span class="lbl">RESET USAGE</span>
+      <span class="spent">${count} ${noun} available</span>
+    </div>
+  </div>`;
+}
+
 function _changelogBlock(url, label) {
   if (!url) return '';
   return `<div class="qw-installs">
@@ -320,6 +331,7 @@ function _renderFocus() {
       ? `<div class="qw-stale-notice">&#9888; ${esc(active.errorText)}</div>`
       : '';
     body = staleNotice + `<div class="qw-bars">${active.bars.map(_bigBar).join('')}</div>`;
+    body += _resetCreditsBlock(active.reset_credits);
     if (active.id === 'claude') {
       body += _extraBlock(active.extra);
       body += _installsBlock(active.installs, active.changelog_url, 'CLAUDE CODE');
@@ -392,6 +404,7 @@ function _renderGrid() {
         ? `<div class="qw-stale-notice qw-stale-card">&#9888; ${esc(p.errorText)}</div>`
         : '';
       let bars = staleNotice + `<div class="qw-card-bars">${p.bars.map(_cardBar).join('')}</div>`;
+      bars += _resetCreditsBlock(p.reset_credits);
       if (p.id === 'claude') {
         bars += _extraBlock(p.extra);
         bars += _installsBlock(p.installs, p.changelog_url, 'CLAUDE CODE');

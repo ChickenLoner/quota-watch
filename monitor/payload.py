@@ -201,6 +201,7 @@ def _provider_entry(pid: str, s: Any, claude_profile: dict[str, Any] | None) -> 
         'statusSev':   worst,
         'bars':           bars,
         'extra':          None,
+        'reset_credits':  None,
         'installs':       None,
         'changelog_url':  _CHANGELOG_URLS.get(pid),
         'changelog_label': _CHANGELOG_LABELS.get(pid),
@@ -209,6 +210,7 @@ def _provider_entry(pid: str, s: Any, claude_profile: dict[str, Any] | None) -> 
         entry['extra'] = _extra_usage(s)
         entry['installs'] = _installs()
     elif pid == 'codex':
+        entry['reset_credits'] = s.extras.get('reset_credits') if s and s.extras else None
         entry['installs'] = _codex_installs()
     elif pid == 'antigravity':
         entry['installs'] = _agy_installs()

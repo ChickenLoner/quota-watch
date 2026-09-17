@@ -164,4 +164,13 @@ class CodexProvider(Provider):
         if credits:
             extras['credits'] = credits
 
+        # Manual "reset usage" credits (free/Plus): lets a capped account clear
+        # its rate limit early instead of waiting for reset_at. Only worth
+        # surfacing once the account is actually capped.
+        reset_credits = data.get('rate_limit_reset_credits')
+        if rate_limit.get('limit_reached') and reset_credits:
+            available = reset_credits.get('available_count')
+            if available:
+                extras['reset_credits'] = available
+
         return self._ok(fields, extras)

@@ -29,6 +29,30 @@ def test_codex_parse_skips_null_used_percent():
     assert snap.fields == []
 
 
+def test_codex_parse_surfaces_reset_credits_when_capped():
+    data = {
+        'rate_limit': {
+            'limit_reached': True,
+            'primary_window': {'used_percent': 100, 'limit_window_seconds': 2592000, 'reset_at': 1791303833},
+        },
+        'rate_limit_reset_credits': {'available_count': 1, 'applicable_available_count': 1},
+    }
+    snap = CodexProvider()._parse(data)
+    assert snap.extras['reset_credits'] == 1
+
+
+def test_codex_parse_hides_reset_credits_when_not_capped():
+    data = {
+        'rate_limit': {
+            'limit_reached': False,
+            'primary_window': {'used_percent': 40, 'limit_window_seconds': 2592000, 'reset_at': 1791303833},
+        },
+        'rate_limit_reset_credits': {'available_count': 1, 'applicable_available_count': 1},
+    }
+    snap = CodexProvider()._parse(data)
+    assert 'reset_credits' not in snap.extras
+
+
 def test_claude_parse_fields_and_extras():
     data = {
         'five_hour': {'utilization': 62.5, 'resets_at': '2026-07-12T20:00:00Z'},
